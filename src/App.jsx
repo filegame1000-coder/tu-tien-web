@@ -1377,6 +1377,15 @@ export default function App() {
                       Mua
                     </ActionButton>
                   </div>
+
+                  <div style={{ background: '#0f172a', padding: 14, borderRadius: 14 }}>
+                    <div style={{ fontWeight: 700, marginBottom: 8 }}>Mạng sống</div>
+                    <div style={{ color: '#cbd5e1', marginBottom: 12 }}>+1 mạng, giá 1000 linh thạch</div>
+                    <ActionButton onClick={handleBuyLife} background="#16a34a">
+                      Mua
+                    </ActionButton>
+                  </div>
+                  
                 </div>
               </SectionCard>
             )}
