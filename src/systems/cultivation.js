@@ -8,8 +8,8 @@ export const OFFLINE_EXP_PER_SECOND = 1
 export const MAX_OFFLINE_SECONDS = 8 * 60 * 60
 
 export function getRequiredExp(realm) {
-  if (realm === REALMS.MORTAL) return 100
-  if (realm === REALMS.QI) return 1000
+  if (realm === REALMS.MORTAL) return 10000
+  if (realm === REALMS.QI) return 100000
   return 999999
 }
 
@@ -55,7 +55,7 @@ export function createDefaultPlayer() {
     realmKey: getRealmKey(REALMS.MORTAL),
     stage: 1,
     exp: 0,
-    expToNext: 100,
+    expToNext: getRequiredExp(REALMS.MORTAL),
     damage: 5,
     hp: 100,
     maxHp: 100,
