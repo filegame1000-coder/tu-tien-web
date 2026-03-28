@@ -1,136 +1,125 @@
 import { useState } from 'react'
+import { RENAME_COST } from '../systems/player'
 
-function ProgressBar({ value, max, color = '#22c55e', background = '#374151' }) {
-  const safeMax = max || 1
-  const percent = Math.max(0, Math.min((value / safeMax) * 100, 100))
+function RenameModal({ player, onRename, onClose }) {
+  const [name, setName] = useState(player?.name || '')
 
   return (
-    <div
-      style={{
-        width: '100%',
-        height: 20,
-        background,
-        borderRadius: 999,
-        overflow: 'hidden'
-      }}
-    >
-      <div
-        style={{
-          width: `${percent}%`,
-          height: '100%',
-          backgroundColor: color,
-          transition: 'width 0.25s ease'
-        }}
-      />
+    <div className="rename-overlay">
+      <div className="rename-modal">
+        <div className="section-kicker">Đổi danh hiệu</div>
+        <h3>Đổi tên nhân vật</h3>
+        <p>
+          Phí đổi tên: <strong>{RENAME_COST}</strong> linh thạch
+        </p>
+        <p className="muted-text" style={{ marginTop: -4 }}>
+          Linh thạch hiện có: <strong>{player?.spiritStones ?? 0}</strong>
+        </p>
+
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Nhập tên mới"
+          className="dao-input"
+          maxLength={20}
+        />
+
+        <div className="action-row" style={{ marginTop: 16 }}>
+          <button
+            className="dao-btn dao-btn-primary"
+            onClick={() => {
+              const ok = onRename(name)
+              if (ok) onClose()
+            }}
+          >
+            Xác nhận
+          </button>
+          <button className="dao-btn dao-btn-muted" onClick={onClose}>
+            Đóng
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
 
-export default function PlayerPanel({
-  player,
-  log,
-  autoTraining,
-  offlineReward,
-  onCultivate,
-  onToggleAuto,
-  onBreakthrough,
-  onCraftPill1,
-  onCraftPill2,
-  onUseHpPotion,
-  onUseMpPotion,
-  onBuyHpPotion,
-  onBuyMpPotion,
-  onBuyLife,
-  onResetSave
-}) {
-  const [showBag, setShowBag] = useState(false)
+function InfoRow({ label, value, emphasize = false }) {
+  return (
+    <div className="info-row">
+      <span>{label}</span>
+      <strong className={emphasize ? 'gold-text' : ''}>{value}</strong>
+    </div>
+  )
+}
 
-  const maxHp = player.maxHp || player.hp || 1
-  const maxMp = player.maxMp || player.mp || 1
+export default function PlayerPanel({ player, finalStats, actions }) {
+  const [showStats, setShowStats] = useState(true)
+  const [openRename, setOpenRename] = useState(false)
+
+  if (!player) return null
+
+  const exp = Number(player.exp) || 0
+  const currentHp = Number(player.hp) || 0
+  const maxHp = Number(finalStats?.maxHp) || 0
+  const currentMp = Number(player.mp) || 0
+  const maxMp = Number(finalStats?.maxMp) || 0
+  const percent = Math.max(0, Math.min((exp / 100) * 100, 100))
 
   return (
-    <div style={{ background: '#1f2937', borderRadius: 16, padding: 20 }}>
-      <h2>Nhân vật</h2>
-
-      <p><strong>{player.realm} - Tầng {player.stage}</strong></p>
-
-      {/* HP */}
-      <ProgressBar value={player.hp} max={maxHp} color="#ef4444" />
-      <div>{player.hp}/{maxHp}</div>
-
-      {/* MP */}
-      <ProgressBar value={player.mp} max={maxMp} color="#3b82f6" />
-      <div>{player.mp}/{maxMp}</div>
-
-      {/* EXP */}
-      <ProgressBar value={player.exp} max={player.expToNext} color="#eab308" />
-      <div>{player.exp}/{player.expToNext}</div>
-
-      <p>Damage: {player.damage}</p>
-      <p>Defense: {player.defense}</p>
-      <p>❤️ Mạng: {player.lives}</p>
-
-      {/* MỞ TÚI */}
-      <button onClick={() => setShowBag(!showBag)}>
-        {showBag ? 'Đóng túi' : 'Mở túi'}
-      </button>
-
-      {showBag && (
-        <>
-          {/* 🎒 INVENTORY */}
-          <div style={{ marginTop: 10 }}>
-            <strong>Túi đồ</strong>
-            <div>Linh thạch: {player.spiritStones}</div>
-            <div>Thảo dược 1: {player.herb1}</div>
-            <div>Thảo dược 2: {player.herb2}</div>
-            <div>Đan cấp 1: {player.pill1}</div>
-            <div>Đan cấp 2: {player.pill2}</div>
-            <div>🧴 Bình máu: {player.hpPotion}</div>
-            <div>🔵 Bình MP: {player.mpPotion}</div>
+    <>
+      <section className="altar-card player-card">
+        <div className="player-header" onClick={() => setShowStats((prev) => !prev)}>
+          <div className="avatar-seal">仙</div>
+          <div>
+            <div className="section-kicker">Đạo hiệu</div>
+            <h2>{player.name || 'Vô Danh'}</h2>
+            <div className="muted-text">
+              {player.realm} • Tầng {player.stage}
+            </div>
           </div>
+        </div>
 
-          {/* 🧴 DÙNG BÌNH */}
-          <div style={{ marginTop: 10 }}>
-            <button onClick={onUseHpPotion}>Dùng bình máu</button>
-            <button onClick={onUseMpPotion}>Dùng bình MP</button>
+        <div className="side-progress">
+          <div className="side-progress-top">
+            <span>Linh lực</span>
+            <strong>{exp}/100</strong>
           </div>
-
-          {/* 🧪 Luyện đan */}
-          <div style={{ marginTop: 10 }}>
-            <strong>Luyện đan</strong>
-            <button onClick={onCraftPill1}>
-              Đan cấp 1 (10 herb + 50 đá)
-            </button>
-            <button onClick={onCraftPill2}>
-              Đan cấp 2 (10 herb2 + 200 đá)
-            </button>
+          <div className="breakthrough-progress compact">
+            <div className="breakthrough-progress-fill" style={{ width: `${percent}%` }} />
           </div>
+        </div>
 
-          {/* 🛒 SHOP */}
-          <div style={{ marginTop: 10 }}>
-            <strong>Shop</strong>
-            <button onClick={onBuyHpPotion}>Bình máu (5)</button>
-            <button onClick={onBuyMpPotion}>Bình MP (5)</button>
-            <button onClick={onBuyLife}>+1 mạng (1000)</button>
+        {showStats ? (
+          <div className="info-group">
+            <InfoRow label="HP" value={`${currentHp}/${maxHp}`} emphasize />
+            <InfoRow label="Ki" value={`${currentMp}/${maxMp}`} />
+            <InfoRow label="Sát thương" value={finalStats?.damage ?? 0} />
+            <InfoRow label="Phòng thủ" value={finalStats?.defense ?? 0} />
+            <InfoRow label="Linh thạch" value={player.spiritStones ?? 0} />
+            <InfoRow label="Dược thảo" value={player.herbs ?? 0} />
           </div>
-        </>
-      )}
+        ) : null}
 
-      {/* ACTION */}
-      <div style={{ marginTop: 10 }}>
-        <button onClick={onCultivate}>Tu luyện</button>
-        <button onClick={onToggleAuto}>
-          {autoTraining ? 'Auto ON' : 'Auto OFF'}
-        </button>
-        <button onClick={onBreakthrough}>Đột phá</button>
-        <button onClick={onResetSave}>Reset</button>
-      </div>
+        <div className="player-actions-grid">
+          <button className="dao-btn dao-btn-primary" onClick={actions.cultivate}>
+            Tu luyện nhanh
+          </button>
+          <button className="dao-btn dao-btn-accent" onClick={actions.breakthrough}>
+            Đột phá
+          </button>
+          <button className="dao-btn dao-btn-muted" onClick={() => setOpenRename(true)}>
+            Đổi tên
+          </button>
+        </div>
+      </section>
 
-      {/* LOG */}
-      <div style={{ marginTop: 10 }}>
-        <strong>Log:</strong>
-        <div>{log}</div>
-      </div>
-    </div>
+      {openRename ? (
+        <RenameModal
+          player={player}
+          onRename={actions.rename}
+          onClose={() => setOpenRename(false)}
+        />
+      ) : null}
+    </>
   )
 }

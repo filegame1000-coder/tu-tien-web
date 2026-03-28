@@ -1,21 +1,30 @@
-export const SAVE_KEY = 'tu-tien-save-v2'
-
-export function saveGame(data) {
-  localStorage.setItem(SAVE_KEY, JSON.stringify(data))
+export function getSaveKey(uid = 'guest') {
+  return `tu-tien-save-v3:${uid}`
 }
 
-export function loadGame() {
-  const raw = localStorage.getItem(SAVE_KEY)
-  if (!raw) return null
-
+export function saveGame(data, uid = 'guest') {
   try {
+    localStorage.setItem(getSaveKey(uid), JSON.stringify(data))
+  } catch (error) {
+    console.error('Lỗi lưu dữ liệu local:', error)
+  }
+}
+
+export function loadGame(uid = 'guest') {
+  try {
+    const raw = localStorage.getItem(getSaveKey(uid))
+    if (!raw) return null
     return JSON.parse(raw)
   } catch (error) {
-    console.error('Lỗi đọc dữ liệu lưu:', error)
+    console.error('Lỗi đọc dữ liệu local:', error)
     return null
   }
 }
 
-export function clearGameSave() {
-  localStorage.removeItem(SAVE_KEY)
+export function clearGameSave(uid = 'guest') {
+  try {
+    localStorage.removeItem(getSaveKey(uid))
+  } catch (error) {
+    console.error('Lỗi xoá dữ liệu local:', error)
+  }
 }

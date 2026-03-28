@@ -1,32 +1,76 @@
-export default function StatsPanel({ player }) {
+export default function StatsPanel({
+  autoExpPerSecond = 0,
+  maxOfflineSeconds = 0
+}) {
+  const safeAutoExpPerSecond = Number(autoExpPerSecond) || 0
+  const safeMaxOfflineSeconds = Number(maxOfflineSeconds) || 0
+
+  const offlineHours = Math.floor(safeMaxOfflineSeconds / 3600)
+  const offlineMinutes = Math.floor((safeMaxOfflineSeconds % 3600) / 60)
+  const offlineSeconds = safeMaxOfflineSeconds % 60
+
+  const offlineText = [
+    offlineHours > 0 ? `${offlineHours} giờ` : '',
+    offlineMinutes > 0 ? `${offlineMinutes} phút` : '',
+    offlineSeconds > 0 ? `${offlineSeconds} giây` : ''
+  ]
+    .filter(Boolean)
+    .join(' ')
+
+  function StatRow({ label, value }) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 12,
+          padding: '10px 0',
+          borderBottom: '1px solid #334155'
+        }}
+      >
+        <span style={{ color: '#cbd5e1' }}>{label}</span>
+        <strong style={{ color: 'white', textAlign: 'right' }}>{value}</strong>
+      </div>
+    )
+  }
+
   return (
     <div
       style={{
         background: '#1f2937',
         borderRadius: 16,
-        padding: 24
+        padding: 20,
+        border: '1px solid #334155',
+        color: 'white'
       }}
     >
-      <h2>Chỉ số nhân vật</h2>
+      <h2 style={{ marginTop: 0, marginBottom: 14 }}>Thông tin tu luyện</h2>
 
-      <div style={{ lineHeight: 2, fontSize: 18 }}>
-        <div>Damage: {player.damage}</div>
-        <div>HP: {player.hp}</div>
-        <div>Defense: {player.defense}</div>
-        <div>MP: {player.mp}</div>
-        <div>Crit Rate: {(player.critRate * 100).toFixed(0)}%</div>
-        <div>Crit Damage: {(player.critDamage * 100).toFixed(0)}%</div>
+      <div
+        style={{
+          padding: 12,
+          borderRadius: 12,
+          background: '#0f172a',
+          border: '1px solid #334155',
+          marginBottom: 16,
+          color: '#cbd5e1',
+          lineHeight: 1.6
+        }}
+      >
+        Khu này hiển thị các thông số hỗ trợ tu luyện tự động và phần thưởng offline.
       </div>
 
-      <div style={{ marginTop: 24 }}>
-        <h3>Thiết kế hiện tại</h3>
-        <div style={{ color: '#cbd5e1', lineHeight: 1.8 }}>
-          <div>• Phàm Nhân: tầng 1 đến 10, mỗi tầng 100 EXP</div>
-          <div>• Luyện Khí: tầng 1 đến 10, mỗi tầng 1000 EXP</div>
-          <div>• Auto tu luyện: 1 EXP / giây</div>
-          <div>• Offline tu luyện: 1 EXP / giây</div>
-          <div>• Giới hạn offline reward: 8 giờ</div>
-        </div>
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        <StatRow
+          label="EXP tự động / giây"
+          value={`${safeAutoExpPerSecond}`}
+        />
+
+        <StatRow
+          label="Giới hạn offline"
+          value={offlineText || '0 giây'}
+        />
       </div>
     </div>
   )
