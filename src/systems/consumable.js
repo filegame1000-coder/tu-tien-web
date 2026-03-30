@@ -15,20 +15,52 @@ export function useConsumable(player, itemId) {
   }
 
   const finalStats = getFinalStats(player)
-  const nextPlayer = { ...player }
+  const nextPlayer = {
+    ...player,
+    baseStats: {
+      ...(player.baseStats || {}),
+    },
+  }
 
-  if (def.effect.hp) {
+  if (def.effect?.hp) {
     nextPlayer.hp = Math.min(
-      (player.hp ?? 0) + def.effect.hp,
-      finalStats.maxHp ?? 0
+      (Number(player?.hp) || 0) + Number(def.effect.hp || 0),
+      Number(finalStats?.maxHp) || 0
     )
   }
 
-  if (def.effect.mp) {
+  if (def.effect?.mp) {
     nextPlayer.mp = Math.min(
-      (player.mp ?? 0) + def.effect.mp,
-      finalStats.maxMp ?? 0
+      (Number(player?.mp) || 0) + Number(def.effect.mp || 0),
+      Number(finalStats?.maxMp) || 0
     )
+  }
+
+  if (def.effect?.baseHp) {
+    nextPlayer.baseStats.maxHp =
+      (Number(nextPlayer.baseStats.maxHp) || 0) + Number(def.effect.baseHp || 0)
+
+    const nextFinalStats = getFinalStats(nextPlayer)
+    nextPlayer.hp = Math.min(
+      Math.max(Number(player?.hp) || 0, Number(nextPlayer.baseStats.maxHp) || 0),
+      Number(nextFinalStats?.maxHp) || 0
+    )
+  }
+
+  if (def.effect?.baseMp) {
+    nextPlayer.baseStats.maxMp =
+      (Number(nextPlayer.baseStats.maxMp) || 0) + Number(def.effect.baseMp || 0)
+
+    const nextFinalStats = getFinalStats(nextPlayer)
+    nextPlayer.mp = Math.min(
+      Math.max(Number(player?.mp) || 0, Number(nextPlayer.baseStats.maxMp) || 0),
+      Number(nextFinalStats?.maxMp) || 0
+    )
+  }
+
+  if (def.effect?.baseDamage) {
+    nextPlayer.baseStats.damage =
+      (Number(nextPlayer.baseStats.damage) || 0) + Number(def.effect.baseDamage || 0)
   }
 
   nextPlayer.inventory = removeConsumableFromInventory(

@@ -1,5 +1,5 @@
 export function getSaveKey(uid = 'guest') {
-  return `tu-tien-save-v3:${uid}`
+  return `tu-tien-save-v4:${uid}`
 }
 
 export function saveGame(data, uid = 'guest') {

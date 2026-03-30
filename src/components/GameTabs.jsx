@@ -1,7 +1,9 @@
 const extraTabs = [
   { key: 'dong-phu', label: 'Động phủ', disabled: false },
+  { key: 'linh-dien', label: 'Linh điền', disabled: false },
   { key: 'van-thu-vien', label: 'Vạn thư viện', disabled: true },
-  { key: 'hanh-trang', label: 'Hành trang', disabled: false }, // bật lên
+  { key: 'hanh-trang', label: 'Hành trang', disabled: false },
+  { key: 'alchemy', label: 'Luyện đan các', disabled: false },
   { key: 'cultivation', label: 'Luyện khí các', disabled: false },
   { key: 'dungeon', label: 'Lịch luyện', disabled: false },
   { key: 'thien-ha', label: 'Thiên hạ', disabled: true },
@@ -14,7 +16,9 @@ export default function GameTabs({ activeTab, onChange }) {
       {extraTabs.map((tab) => {
         const mappedKey =
           tab.key === 'dong-phu'
-            ? 'cultivation'
+            ? 'dong-phu'
+            : tab.key === 'linh-dien'
+            ? 'farm'
             : tab.key === 'hanh-trang'
             ? 'bag'
             : tab.key

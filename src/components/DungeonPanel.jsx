@@ -1,3 +1,5 @@
+import LogPanel from './LogPanel'
+
 function Bar({ value, max, label }) {
   const safeValue = Number(value) || 0
   const safeMax = Math.max(1, Number(max) || 1)
@@ -18,7 +20,13 @@ function Bar({ value, max, label }) {
   )
 }
 
-export default function DungeonPanel({ player, dungeon, actions, finalStats }) {
+export default function DungeonPanel({
+  player,
+  dungeon,
+  actions,
+  finalStats,
+  combatLogs = [],
+}) {
   const enemy = dungeon?.currentEnemy
   const playerHp = player?.hp ?? 0
 
@@ -46,50 +54,57 @@ export default function DungeonPanel({ player, dungeon, actions, finalStats }) {
             </button>
           </div>
         ) : (
-          <div className="battle-grid">
-            <div className="battle-panel">
-              <div className="battle-name">{player?.name || 'Đạo hữu'}</div>
-              <div className="muted-text">{player?.realm} • Tầng {player?.stage}</div>
-              <Bar label="HP" value={player?.hp ?? 0} max={finalStats?.maxHp ?? 1} />
-              <Bar label="Ki" value={player?.mp ?? 0} max={finalStats?.maxMp ?? 1} />
-              <div className="battle-stats">
-                <span>Sát thương: {finalStats?.damage ?? 0}</span>
-                <span>Phòng thủ: {finalStats?.defense ?? 0}</span>
+          <>
+            <div className="battle-grid">
+              <div className="battle-panel">
+                <div className="battle-name">{player?.name || 'Đạo hữu'}</div>
+                <div className="muted-text">
+                  {player?.realm} • Tầng {player?.stage}
+                </div>
+                <Bar label="HP" value={player?.hp ?? 0} max={finalStats?.maxHp ?? 1} />
+                <Bar label="Ki" value={player?.mp ?? 0} max={finalStats?.maxMp ?? 1} />
+                <div className="battle-stats">
+                  <span>Sát thương: {finalStats?.damage ?? 0}</span>
+                  <span>Phòng thủ: {finalStats?.defense ?? 0}</span>
+                </div>
+              </div>
+
+              <div className="battle-vs">VS</div>
+
+              <div className="battle-panel enemy-panel">
+                <div className="battle-name">{enemy?.name || 'Yêu thú chưa xuất hiện'}</div>
+                <div className="muted-text">
+                  {enemy?.type === 'boss'
+                    ? 'Boss'
+                    : `${enemy?.realm ?? 'Phàm Nhân'} • Tầng ${enemy?.stage ?? 1}`}
+                </div>
+                <Bar label="HP" value={enemy?.hp ?? 0} max={enemy?.maxHp ?? 1} />
+                <div className="battle-stats">
+                  <span>Sát thương: {enemy?.damage ?? 0}</span>
+                  <span>Phòng thủ: {enemy?.defense ?? 0}</span>
+                </div>
               </div>
             </div>
 
-            <div className="battle-vs">VS</div>
-
-            <div className="battle-panel enemy-panel">
-              <div className="battle-name">{enemy?.name || 'Yêu thú chưa xuất hiện'}</div>
-              <div className="muted-text">
-                {enemy?.type === 'boss'
-                  ? 'Boss'
-                  : `${enemy?.realm ?? 'Phàm Nhân'} • Tầng ${enemy?.stage ?? 1}`}
-              </div>
-              <Bar label="HP" value={enemy?.hp ?? 0} max={enemy?.maxHp ?? 1} />
-              <div className="battle-stats">
-                <span>Sát thương: {enemy?.damage ?? 0}</span>
-                <span>Phòng thủ: {enemy?.defense ?? 0}</span>
-              </div>
+            <div className="action-row centered">
+              <button
+                className="dao-btn dao-btn-danger"
+                onClick={actions.attackEnemy}
+                disabled={!enemy || playerHp <= 0}
+              >
+                Tấn công
+              </button>
+              <button className="dao-btn dao-btn-muted" onClick={actions.leaveDungeon}>
+                Rời bí cảnh
+              </button>
             </div>
-          </div>
+
+            <div className="mini-panel" style={{ marginTop: 24 }}>
+              <div className="mini-panel-title">Nhật ký chiến đấu</div>
+              <LogPanel logs={combatLogs} />
+            </div>
+          </>
         )}
-
-        {dungeon?.currentFloor ? (
-          <div className="action-row centered">
-            <button
-              className="dao-btn dao-btn-danger"
-              onClick={actions.attackEnemy}
-              disabled={!enemy || playerHp <= 0}
-            >
-              Tấn công
-            </button>
-            <button className="dao-btn dao-btn-muted" onClick={actions.leaveDungeon}>
-              Rời bí cảnh
-            </button>
-          </div>
-        ) : null}
       </div>
     </section>
   )

@@ -861,3 +861,106 @@ input {
   border-color: rgba(255, 214, 102, 0.45);
   box-shadow: 0 0 0 3px rgba(255, 214, 102, 0.08);
 }
+.inventory-description {
+  margin: 0 0 12px;
+  color: #b8c3df;
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+.inventory-stat-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.inventory-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(86, 54, 146, 0.18);
+  border: 1px solid rgba(180, 145, 255, 0.16);
+  color: #ddd6fe;
+  font-size: 13px;
+}
+
+.alchemy-recipe-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.alchemy-active-panel {
+  margin-bottom: 18px;
+}
+
+.alchemy-active-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.alchemy-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  color: #d6def2;
+}
+.inventory-description {
+  margin: 0 0 12px;
+  color: #b8c3df;
+  line-height: 1.7;
+  font-size: 14px;
+}
+
+.inventory-stat-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.inventory-stat-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(86, 54, 146, 0.18);
+  border: 1px solid rgba(180, 145, 255, 0.16);
+  color: #ddd6fe;
+  font-size: 13px;
+}
+
+.alchemy-progress-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  color: #d6def2;
+}
+
+.herb-garden-top-panel {
+  margin-bottom: 18px;
+}
+
+.herb-slot-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 250px;
+}
+
+.herb-slot-locked {
+  opacity: 0.72;
+  border: 1px dashed rgba(167, 177, 214, 0.24);
+}
+
+.herb-slot-card .dao-btn {
+  margin-top: auto;
+}

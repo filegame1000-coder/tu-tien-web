@@ -73,6 +73,28 @@ function renderStats(stats = {}) {
   )
 }
 
+function renderConsumableEffect(effect = {}) {
+  const lines = []
+
+  if (effect.hp) lines.push(`Hồi ngay +${effect.hp} HP`)
+  if (effect.mp) lines.push(`Hồi ngay +${effect.mp} MP`)
+  if (effect.baseHp) lines.push(`Tăng vĩnh viễn +${effect.baseHp} HP gốc`)
+  if (effect.baseMp) lines.push(`Tăng vĩnh viễn +${effect.baseMp} MP gốc`)
+  if (effect.baseDamage) lines.push(`Tăng vĩnh viễn +${effect.baseDamage} damage gốc`)
+
+  if (lines.length === 0) return null
+
+  return (
+    <div className="inventory-stat-list">
+      {lines.map((line) => (
+        <span key={line} className="inventory-stat-chip">
+          {line}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export default function BagPanel({ player, actions }) {
   const inventory = Array.isArray(player?.inventory) ? player.inventory : []
   const items = getInventoryEntries(inventory)
@@ -147,7 +169,12 @@ export default function BagPanel({ player, actions }) {
                   </div>
                 </div>
 
+                {item.description ? (
+                  <p className="inventory-description">{item.description}</p>
+                ) : null}
+
                 {item.type === 'equipment' && renderStats(item.stats)}
+                {item.type === 'consumable' && renderConsumableEffect(item.effect)}
 
                 <div className="inventory-actions">
                   {item.type === 'equipment' && !item.equipped && (

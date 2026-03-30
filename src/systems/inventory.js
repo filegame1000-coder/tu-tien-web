@@ -109,6 +109,7 @@ export function toInventoryViewModel(item) {
       quantity: 1,
       equipped: !!item.equipped,
       stats: def.stats || {},
+      description: def.description || '',
       raw: item,
     }
   }
@@ -125,6 +126,7 @@ export function toInventoryViewModel(item) {
       quantity: item.quantity || 0,
       equipped: false,
       effect: def.effect || {},
+      description: def.description || '',
       raw: item,
     }
   }

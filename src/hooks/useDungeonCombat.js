@@ -14,6 +14,8 @@ export function useDungeonCombat({
   setPlayer,
   finalStats,
   pushLog,
+  pushCombatLog,
+  clearCombatLog,
   dungeonState,
 }) {
   const {
@@ -42,14 +44,21 @@ export function useDungeonCombat({
   }
 
   function handleEnterDungeon(floor) {
+    clearCombatLog()
     setCurrentDungeonFloor(floor)
 
     if (floor === 1) {
-      setCurrentEnemy(createRandomFloor1Monster())
+      const enemy = createRandomFloor1Monster()
+      setCurrentEnemy(enemy)
       pushLog('Bạn tiến vào Bí Cảnh tầng 1.')
+      pushCombatLog(`⚔️ Bạn tiến vào Bí Cảnh tầng 1.`)
+      pushCombatLog(`👹 Gặp ${enemy.name}.`)
     } else {
-      setCurrentEnemy(createBoss(2))
+      const enemy = createBoss(2)
+      setCurrentEnemy(enemy)
       pushLog('Bạn tiến vào Bí Cảnh tầng 2.')
+      pushCombatLog(`⚔️ Bạn tiến vào Bí Cảnh tầng 2.`)
+      pushCombatLog(`👹 Gặp ${enemy.name}.`)
     }
 
     setActiveTab('dungeon')
@@ -58,17 +67,20 @@ export function useDungeonCombat({
   function handleLeaveDungeon() {
     exitDungeon()
     pushLog('Bạn rời khỏi bí cảnh.')
+    pushCombatLog('🚪 Bạn rời khỏi bí cảnh.')
   }
 
   function handleAttackEnemy() {
     if (!currentEnemy || !currentDungeonFloor) {
       pushLog('Hiện không có mục tiêu trong bí cảnh.')
+      pushCombatLog('Không có mục tiêu để tấn công.')
       return
     }
 
     if ((player.hp ?? 0) <= 0) {
       exitDungeon()
       pushLog('Bạn đã trọng thương, bị đẩy ra khỏi bí cảnh.')
+      pushCombatLog('💀 Bạn đã trọng thương và bị đẩy ra khỏi bí cảnh.')
       return
     }
 
@@ -77,7 +89,9 @@ export function useDungeonCombat({
 
     const result = resolveCombatRound(playerEntity, enemyEntity)
 
-    result.logs.forEach((text) => pushLog(text))
+    result.logs.forEach((text, index) => {
+      pushCombatLog(index === 0 ? `🗡️ ${text}` : `👹 ${text}`)
+    })
 
     if (result.isEnemyDead) {
       if (currentEnemy.type === 'monster') {
@@ -92,11 +106,17 @@ export function useDungeonCombat({
         setKillCount(nextKillCount)
 
         pushLog(`Bạn đánh bại ${currentEnemy.name}, nhận 10 EXP và 1 linh thạch.`)
+        pushCombatLog(`🔥 Bạn đánh bại ${currentEnemy.name}.`)
+        pushCombatLog(`🎁 Nhận 10 EXP và 1 linh thạch.`)
 
         if (currentDungeonFloor === 1) {
-          setCurrentEnemy(spawnFloor1Enemy(nextKillCount))
+          const nextEnemy = spawnFloor1Enemy(nextKillCount)
+          setCurrentEnemy(nextEnemy)
+          pushCombatLog(`👹 Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`)
         } else {
-          setCurrentEnemy(createBoss(2))
+          const nextEnemy = createBoss(2)
+          setCurrentEnemy(nextEnemy)
+          pushCombatLog(`👹 Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`)
         }
 
         return
@@ -115,11 +135,19 @@ export function useDungeonCombat({
       pushLog(
         `Bạn đánh bại ${currentEnemy.name}, nhận ${currentEnemy.rewardExp ?? 0} EXP. ${drop.message}`
       )
+      pushCombatLog(`🔥 Bạn đánh bại ${currentEnemy.name}.`)
+      pushCombatLog(
+        `🎁 Nhận ${currentEnemy.rewardExp ?? 0} EXP, +${drop.spiritStones ?? 0} linh thạch, +${drop.herbs ?? 0} dược thảo.`
+      )
 
       if (currentDungeonFloor === 1) {
-        setCurrentEnemy(createRandomFloor1Monster())
+        const nextEnemy = createRandomFloor1Monster()
+        setCurrentEnemy(nextEnemy)
+        pushCombatLog(`👹 Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`)
       } else {
-        setCurrentEnemy(createBoss(2))
+        const nextEnemy = createBoss(2)
+        setCurrentEnemy(nextEnemy)
+        pushCombatLog(`👹 Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`)
       }
 
       return
@@ -133,6 +161,7 @@ export function useDungeonCombat({
 
       exitDungeon()
       pushLog('Bạn bị đánh bại và bị đẩy ra khỏi bí cảnh.')
+      pushCombatLog('💀 Bạn đã bị đánh bại và bị đẩy ra khỏi bí cảnh.')
       return
     }
 

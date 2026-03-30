@@ -2,6 +2,8 @@ import { useAuthState } from './hooks/useAuthState'
 import { usePlayer } from './hooks/usePlayer'
 import PlayerPanel from './components/PlayerPanel'
 import DungeonPanel from './components/DungeonPanel'
+import HerbGardenPanel from './components/HerbGardenPanel'
+import AlchemyPanel from './components/AlchemyPanel'
 import GameTabs from './components/GameTabs'
 import EquipmentPanel from './components/EquipmentPanel'
 import LogPanel from './components/LogPanel'
@@ -174,14 +176,18 @@ export default function App() {
   const {
     loading: gameLoading,
     player,
+    herbGarden,
     actions,
     breakthroughCost,
     logs,
+    combatLogs,
     activeTab,
     dungeon,
     finalStats,
     needsInitialNaming,
     message,
+    crafting,
+    craftingRemainMs,
   } = usePlayer(user)
 
   if (!ready) {
@@ -237,7 +243,7 @@ export default function App() {
           </aside>
 
           <main className="right-column">
-            {activeTab === 'cultivation' && (
+            {(activeTab === 'dong-phu' || activeTab === 'cultivation') && (
               <CultivationScreen
                 player={player}
                 actions={actions}
@@ -247,7 +253,24 @@ export default function App() {
               />
             )}
 
+            {activeTab === 'farm' && (
+              <HerbGardenPanel
+                player={player}
+                herbGarden={herbGarden}
+                actions={actions}
+              />
+            )}
+
             {activeTab === 'bag' && <BagPanel player={player} actions={actions} />}
+
+            {activeTab === 'alchemy' && (
+              <AlchemyPanel
+                player={player}
+                actions={actions}
+                crafting={crafting}
+                craftingRemainMs={craftingRemainMs}
+              />
+            )}
 
             {activeTab === 'dungeon' && (
               <DungeonPanel
@@ -255,6 +278,7 @@ export default function App() {
                 dungeon={dungeon}
                 actions={actions}
                 finalStats={finalStats}
+                combatLogs={combatLogs}
               />
             )}
           </main>
