@@ -1,0 +1,1723 @@
+import { onCall, HttpsError } from 'firebase-functions/v2/https'
+import { initializeApp } from 'firebase-admin/app'
+import { FieldValue, getFirestore } from 'firebase-admin/firestore'
+
+initializeApp()
+
+const db = getFirestore()
+
+const REALM_MORTAL = 'Phàm Nhân'
+const REALM_QI = 'Luyện Khí'
+const EQUIPMENT_DEFS = {
+  beginner_sword: {
+    stats: {
+      damage: 2,
+    },
+  },
+  cloth_armor: {
+    stats: {
+      maxHp: 10,
+      defense: 1,
+    },
+  },
+  wind_boots: {
+    stats: {
+      dodgeChance: 0.03,
+    },
+  },
+  spirit_ring: {
+    stats: {
+      damage: 1,
+      maxHp: 5,
+    },
+  },
+}
+
+function normalizeRealm(realm) {
+  const raw = String(realm || '').trim()
+  const lowered = raw.toLowerCase()
+
+  if (
+    raw === REALM_MORTAL ||
+    raw === 'PhÃ m NhÃ¢n' ||
+    lowered === 'pham nhan' ||
+    lowered === 'phàm nhân'
+  ) {
+    return REALM_MORTAL
+  }
+
+  if (
+    raw === REALM_QI ||
+    raw === 'Luyá»‡n KhÃ­' ||
+    lowered === 'luyen khi' ||
+    lowered === 'luyện khí'
+  ) {
+    return REALM_QI
+  }
+
+  return raw || REALM_MORTAL
+}
+
+function createDefaultPlayer() {
+  return {
+    id: 'player_001',
+    name: '',
+    realm: REALM_MORTAL,
+    stage: 1,
+    exp: 0,
+    spiritStones: 1200,
+    herbs: 20,
+    hp: 100,
+    mp: 100,
+    baseStats: {
+      maxHp: 100,
+      maxMp: 100,
+      damage: 8,
+      defense: 2,
+      critChance: 0.1,
+      critDamage: 1.5,
+      dodgeChance: 0.03,
+      lifesteal: 0,
+      damageReduction: 0,
+      shield: 0,
+      physicalBonus: 0,
+      spiritualBonus: 0,
+      trueBonus: 0,
+      physicalResist: 0,
+      spiritualResist: 0,
+      trueResist: 0,
+      hitChance: 1,
+      antiCritChance: 0,
+      realmMultiplier: 1,
+    },
+    equipment: {
+      weapon: null,
+      armor: null,
+      ring: null,
+      boots: null,
+    },
+    inventory: [
+      {
+        defId: 'beginner_sword',
+        instanceId: 'seed_weapon_001',
+        enhanceLevel: 0,
+        equipped: false,
+        bonusStats: {},
+      },
+      {
+        defId: 'cloth_armor',
+        instanceId: 'seed_armor_001',
+        enhanceLevel: 0,
+        equipped: false,
+        bonusStats: {},
+      },
+      { id: 'hp_potion_small', quantity: 3 },
+      { id: 'mp_potion_small', quantity: 2 },
+    ],
+  }
+}
+
+function createDefaultHerbGarden() {
+  return {
+    unlockedSlots: 1,
+    slots: Array.from({ length: 8 }, (_, index) => ({
+      index,
+      plantedAt: null,
+      completeAt: null,
+    })),
+  }
+}
+
+const HERB_GARDEN_MAX_SLOTS = 8
+const HERB_GARDEN_START_SLOTS = 1
+const HERB_GARDEN_UNLOCK_COST = 1000
+const HERB_GARDEN_GROW_TIME_MS = 5 * 60 * 1000
+const HERB_GARDEN_HARVEST_YIELD = 1
+
+const ALCHEMY_RECIPES = {
+  thoi_the_dan: {
+    id: 'thoi_the_dan',
+    itemId: 'thoi_the_dan',
+    name: 'Thoi The Dan',
+    craftTimeMs: 10_000,
+    cost: {
+      herbs: 10,
+      spiritStones: 50,
+    },
+  },
+  thoi_than_dan: {
+    id: 'thoi_than_dan',
+    itemId: 'thoi_than_dan',
+    name: 'Thoi Than Dan',
+    craftTimeMs: 10_000,
+    cost: {
+      herbs: 10,
+      spiritStones: 50,
+    },
+  },
+  thoi_thanh_dan: {
+    id: 'thoi_thanh_dan',
+    itemId: 'thoi_thanh_dan',
+    name: 'Thoi Thanh Dan',
+    craftTimeMs: 10_000,
+    cost: {
+      herbs: 20,
+      spiritStones: 50,
+    },
+  },
+}
+
+const CONSUMABLE_DEFS = {
+  hp_potion_small: {
+    id: 'hp_potion_small',
+    name: 'Binh HP',
+  },
+  mp_potion_small: {
+    id: 'mp_potion_small',
+    name: 'Binh Ki',
+  },
+  thoi_the_dan: {
+    id: 'thoi_the_dan',
+    name: 'Thoi The Dan',
+  },
+  thoi_than_dan: {
+    id: 'thoi_than_dan',
+    name: 'Thoi Than Dan',
+  },
+  thoi_thanh_dan: {
+    id: 'thoi_thanh_dan',
+    name: 'Thoi Thanh Dan',
+  },
+}
+
+function createEmptyHerbSlot(index) {
+  return {
+    index,
+    plantedAt: null,
+    completeAt: null,
+  }
+}
+
+function normalizeHerbGarden(herbGarden) {
+  if (!herbGarden || typeof herbGarden !== 'object') {
+    return createDefaultHerbGarden()
+  }
+
+  const unlockedSlots = Math.max(
+    HERB_GARDEN_START_SLOTS,
+    Math.min(
+      Number(herbGarden.unlockedSlots) || HERB_GARDEN_START_SLOTS,
+      HERB_GARDEN_MAX_SLOTS
+    )
+  )
+  const rawSlots = Array.isArray(herbGarden.slots) ? herbGarden.slots : []
+
+  return {
+    unlockedSlots,
+    slots: Array.from({ length: HERB_GARDEN_MAX_SLOTS }, (_, index) => {
+      const slot = rawSlots[index]
+
+      if (!slot || typeof slot !== 'object') {
+        return createEmptyHerbSlot(index)
+      }
+
+      return {
+        index,
+        plantedAt: slot.plantedAt ?? null,
+        completeAt: slot.completeAt ?? null,
+      }
+    }),
+  }
+}
+
+function isHerbSlotUnlocked(herbGarden, slotIndex) {
+  return slotIndex >= 0 && slotIndex < (Number(herbGarden?.unlockedSlots) || 0)
+}
+
+function isHerbSlotPlanted(slot) {
+  return !!slot?.plantedAt && !!slot?.completeAt
+}
+
+function isHerbSlotReady(slot, now = Date.now()) {
+  if (!isHerbSlotPlanted(slot)) return false
+  return now >= Number(slot.completeAt)
+}
+
+function unlockHerbGardenSlot(player, herbGarden) {
+  const garden = normalizeHerbGarden(herbGarden)
+  const unlockedSlots = Number(garden.unlockedSlots) || HERB_GARDEN_START_SLOTS
+
+  if (unlockedSlots >= HERB_GARDEN_MAX_SLOTS) {
+    return {
+      ok: false,
+      message: 'Linh dien da mo toi da 8 o.',
+    }
+  }
+
+  if ((Number(player?.spiritStones) || 0) < HERB_GARDEN_UNLOCK_COST) {
+    return {
+      ok: false,
+      message: `Khong du ${HERB_GARDEN_UNLOCK_COST} linh thach de mo them o linh dien.`,
+    }
+  }
+
+  return {
+    ok: true,
+    player: {
+      ...player,
+      spiritStones:
+        (Number(player?.spiritStones) || 0) - HERB_GARDEN_UNLOCK_COST,
+    },
+    herbGarden: {
+      ...garden,
+      unlockedSlots: unlockedSlots + 1,
+    },
+    message: `Da mo them 1 o linh dien, tieu hao ${HERB_GARDEN_UNLOCK_COST} linh thach.`,
+  }
+}
+
+function plantHerbSeed(herbGarden, slotIndex, now = Date.now()) {
+  const garden = normalizeHerbGarden(herbGarden)
+
+  if (!isHerbSlotUnlocked(garden, slotIndex)) {
+    return {
+      ok: false,
+      message: 'O linh dien nay chua duoc mo.',
+    }
+  }
+
+  const slot = garden.slots[slotIndex]
+
+  if (isHerbSlotPlanted(slot)) {
+    return {
+      ok: false,
+      message: 'O linh dien nay dang trong duoc thao.',
+    }
+  }
+
+  return {
+    ok: true,
+    herbGarden: {
+      ...garden,
+      slots: garden.slots.map((currentSlot, index) =>
+        index === slotIndex
+          ? {
+              ...currentSlot,
+              plantedAt: now,
+              completeAt: now + HERB_GARDEN_GROW_TIME_MS,
+            }
+          : currentSlot
+      ),
+    },
+    message: `Da gieo hat giong vao o linh dien #${slotIndex + 1}.`,
+  }
+}
+
+function harvestHerbSlot(player, herbGarden, slotIndex, now = Date.now()) {
+  const garden = normalizeHerbGarden(herbGarden)
+
+  if (!isHerbSlotUnlocked(garden, slotIndex)) {
+    return {
+      ok: false,
+      message: 'O linh dien nay chua duoc mo.',
+    }
+  }
+
+  const slot = garden.slots[slotIndex]
+
+  if (!isHerbSlotPlanted(slot)) {
+    return {
+      ok: false,
+      message: 'O linh dien nay chua gieo trong.',
+    }
+  }
+
+  if (!isHerbSlotReady(slot, now)) {
+    return {
+      ok: false,
+      message: 'Duoc thao van chua chin.',
+    }
+  }
+
+  return {
+    ok: true,
+    player: {
+      ...player,
+      herbs: (Number(player?.herbs) || 0) + HERB_GARDEN_HARVEST_YIELD,
+    },
+    herbGarden: {
+      ...garden,
+      slots: garden.slots.map((currentSlot, index) =>
+        index === slotIndex
+          ? {
+              ...currentSlot,
+              plantedAt: null,
+              completeAt: null,
+            }
+          : currentSlot
+      ),
+    },
+    message: `Da thu hoach o linh dien #${slotIndex + 1}, nhan ${HERB_GARDEN_HARVEST_YIELD} duoc thao.`,
+  }
+}
+
+function harvestAllReadyHerbs(player, herbGarden, now = Date.now()) {
+  const garden = normalizeHerbGarden(herbGarden)
+  let harvestedCount = 0
+
+  const slots = garden.slots.map((slot, index) => {
+    if (!isHerbSlotUnlocked(garden, index) || !isHerbSlotReady(slot, now)) {
+      return slot
+    }
+
+    harvestedCount += 1
+    return {
+      ...slot,
+      plantedAt: null,
+      completeAt: null,
+    }
+  })
+
+  if (harvestedCount <= 0) {
+    return {
+      ok: false,
+      message: 'Hien chua co o linh dien nao san sang thu hoach.',
+    }
+  }
+
+  return {
+    ok: true,
+    player: {
+      ...player,
+      herbs:
+        (Number(player?.herbs) || 0) +
+        harvestedCount * HERB_GARDEN_HARVEST_YIELD,
+    },
+    herbGarden: {
+      ...garden,
+      slots,
+    },
+    message: `Da thu hoach ${harvestedCount} o linh dien, nhan ${
+      harvestedCount * HERB_GARDEN_HARVEST_YIELD
+    } duoc thao.`,
+  }
+}
+
+function getAlchemyRecipe(recipeId) {
+  return ALCHEMY_RECIPES[recipeId] || null
+}
+
+function addItemToInventory(inventory = [], itemToAdd) {
+  if (!itemToAdd) return inventory
+
+  const existingIndex = inventory.findIndex(
+    (item) => item?.id === itemToAdd.id && !item?.defId
+  )
+
+  if (existingIndex >= 0) {
+    return inventory.map((item, index) =>
+      index === existingIndex
+        ? {
+            ...item,
+            quantity: (item.quantity || 0) + (itemToAdd.quantity || 1),
+          }
+        : item
+    )
+  }
+
+  return [
+    ...inventory,
+    {
+      id: itemToAdd.id,
+      quantity: itemToAdd.quantity || 1,
+    },
+  ]
+}
+
+function startAlchemyCraft(player, recipeId, now = Date.now()) {
+  const recipe = getAlchemyRecipe(recipeId)
+
+  if (!recipe) {
+    return {
+      ok: false,
+      message: 'Dan phuong khong ton tai.',
+    }
+  }
+
+  if ((Number(player?.herbs) || 0) < (Number(recipe.cost?.herbs) || 0)) {
+    return {
+      ok: false,
+      message: `Khong du duoc thao de luyen ${recipe.name}.`,
+    }
+  }
+
+  if (
+    (Number(player?.spiritStones) || 0) <
+    (Number(recipe.cost?.spiritStones) || 0)
+  ) {
+    return {
+      ok: false,
+      message: `Khong du linh thach de luyen ${recipe.name}.`,
+    }
+  }
+
+  const itemDef = CONSUMABLE_DEFS[recipe.itemId]
+
+  if (!itemDef) {
+    return {
+      ok: false,
+      message: 'Vat pham dau ra cua dan phuong khong hop le.',
+    }
+  }
+
+  return {
+    ok: true,
+    player: {
+      ...player,
+      herbs: (Number(player?.herbs) || 0) - (Number(recipe.cost?.herbs) || 0),
+      spiritStones:
+        (Number(player?.spiritStones) || 0) -
+        (Number(recipe.cost?.spiritStones) || 0),
+    },
+    crafting: {
+      recipeId: recipe.id,
+      itemId: recipe.itemId,
+      recipeName: recipe.name,
+      itemName: itemDef.name,
+      startedAt: now,
+      completeAt: now + (Number(recipe.craftTimeMs) || 0),
+      durationMs: Number(recipe.craftTimeMs) || 0,
+    },
+    message: `Bat dau luyen ${recipe.name}.`,
+  }
+}
+
+function isAlchemyCraftComplete(craftState, now = Date.now()) {
+  if (!craftState?.completeAt) return false
+  return now >= Number(craftState.completeAt)
+}
+
+function finishAlchemyCraft(player, craftState) {
+  if (!craftState?.itemId) {
+    return {
+      ok: false,
+      message: 'Khong co tien trinh luyen dan hop le.',
+    }
+  }
+
+  const itemDef = CONSUMABLE_DEFS[craftState.itemId]
+
+  if (!itemDef) {
+    return {
+      ok: false,
+      message: 'Dan duoc hoan thanh khong hop le.',
+    }
+  }
+
+  return {
+    ok: true,
+    player: {
+      ...player,
+      inventory: addItemToInventory(player?.inventory || [], {
+        id: craftState.itemId,
+        quantity: 1,
+      }),
+    },
+    message: `Luyen thanh cong ${itemDef.name}.`,
+  }
+}
+
+function sanitizeLogs(rawLogs, nextMessage) {
+  const logs = Array.isArray(rawLogs) ? rawLogs.filter(Boolean) : []
+  return [nextMessage, ...logs].slice(0, 20)
+}
+
+function sanitizeCombatLogs(rawLogs) {
+  const logs = Array.isArray(rawLogs) ? rawLogs.filter(Boolean) : []
+  return logs.slice(-40)
+}
+
+function getBreakthroughCost(player) {
+  const realm = normalizeRealm(player?.realm)
+
+  if (realm === REALM_MORTAL) {
+    return { spiritStones: 100, herbs: 10 }
+  }
+
+  if (realm === REALM_QI) {
+    return { spiritStones: 200, herbs: 10 }
+  }
+
+  return { spiritStones: 0, herbs: 0 }
+}
+
+function canBreakthrough(player) {
+  const cost = getBreakthroughCost(player)
+
+  if ((Number(player?.exp) || 0) < 100) {
+    return {
+      ok: false,
+      message: 'Chưa đủ 100 EXP để đột phá.',
+    }
+  }
+
+  if ((Number(player?.spiritStones) || 0) < cost.spiritStones) {
+    return {
+      ok: false,
+      message: `Không đủ ${cost.spiritStones} linh thạch.`,
+    }
+  }
+
+  if ((Number(player?.herbs) || 0) < cost.herbs) {
+    return {
+      ok: false,
+      message: `Không đủ ${cost.herbs} dược thảo.`,
+    }
+  }
+
+  return { ok: true }
+}
+
+function applyBaseStatGrowth(player, growth) {
+  const currentBase = player?.baseStats || {}
+
+  const nextBaseStats = {
+    ...currentBase,
+    maxHp: (Number(currentBase.maxHp) || 0) + (Number(growth.maxHp) || 0),
+    maxMp: (Number(currentBase.maxMp) || 0) + (Number(growth.maxMp) || 0),
+    damage: (Number(currentBase.damage) || 0) + (Number(growth.damage) || 0),
+    defense: (Number(currentBase.defense) || 0) + (Number(growth.defense) || 0),
+  }
+
+  return {
+    ...player,
+    hp: nextBaseStats.maxHp,
+    mp: nextBaseStats.maxMp,
+    baseStats: nextBaseStats,
+  }
+}
+
+function breakthrough(player) {
+  const normalizedPlayer = {
+    ...player,
+    realm: normalizeRealm(player?.realm),
+  }
+
+  const check = canBreakthrough(normalizedPlayer)
+  if (!check.ok) return check
+
+  const cost = getBreakthroughCost(normalizedPlayer)
+
+  let updated = {
+    ...normalizedPlayer,
+    exp: 0,
+    spiritStones:
+      (Number(normalizedPlayer?.spiritStones) || 0) - cost.spiritStones,
+    herbs: (Number(normalizedPlayer?.herbs) || 0) - cost.herbs,
+  }
+
+  if (normalizedPlayer.realm === REALM_MORTAL) {
+    updated = applyBaseStatGrowth(updated, {
+      maxHp: 100,
+      maxMp: 100,
+      damage: 1,
+      defense: 1,
+    })
+
+    if ((Number(normalizedPlayer?.stage) || 1) < 10) {
+      updated.stage = (Number(normalizedPlayer?.stage) || 1) + 1
+      return {
+        ok: true,
+        player: updated,
+        message: `Đột phá thành công Phàm Nhân tầng ${updated.stage}.`,
+      }
+    }
+
+    updated.realm = REALM_QI
+    updated.stage = 1
+
+    return {
+      ok: true,
+      player: updated,
+      message: 'Đột phá thành công, bước vào Luyện Khí tầng 1.',
+    }
+  }
+
+  if (normalizedPlayer.realm === REALM_QI) {
+    if ((Number(normalizedPlayer?.stage) || 1) >= 10) {
+      return {
+        ok: false,
+        message: 'Tạm thời đã đạt cảnh giới cao nhất.',
+      }
+    }
+
+    updated = applyBaseStatGrowth(updated, {
+      maxHp: 200,
+      maxMp: 200,
+      damage: 2,
+      defense: 1,
+    })
+
+    updated.stage = (Number(normalizedPlayer?.stage) || 1) + 1
+
+    return {
+      ok: true,
+      player: updated,
+      message: `Đột phá thành công Luyện Khí tầng ${updated.stage}.`,
+    }
+  }
+
+  return {
+    ok: false,
+    message: 'Không thể đột phá.',
+  }
+}
+
+function getEquippedItems(player) {
+  const result = []
+
+  for (const instanceId of Object.values(player?.equipment ?? {})) {
+    if (!instanceId) continue
+
+    const inventoryItem = (player?.inventory ?? []).find(
+      (item) => item?.instanceId === instanceId
+    )
+    if (!inventoryItem) continue
+
+    const def = EQUIPMENT_DEFS[inventoryItem.defId]
+    if (!def) continue
+
+    result.push({ instance: inventoryItem, def })
+  }
+
+  return result
+}
+
+function getEquipmentStats(player) {
+  const total = {
+    maxHp: 0,
+    maxMp: 0,
+    damage: 0,
+    defense: 0,
+    critChance: 0,
+    critDamage: 0,
+    dodgeChance: 0,
+    lifesteal: 0,
+    damageReduction: 0,
+    shield: 0,
+    physicalBonus: 0,
+    spiritualBonus: 0,
+    trueBonus: 0,
+    physicalResist: 0,
+    spiritualResist: 0,
+    trueResist: 0,
+    hitChance: 0,
+    antiCritChance: 0,
+    realmMultiplier: 0,
+  }
+
+  for (const item of getEquippedItems(player)) {
+    const baseStats = item.def.stats ?? {}
+    const bonusStats = item.instance.bonusStats ?? {}
+
+    for (const [key, value] of Object.entries(baseStats)) {
+      total[key] = (total[key] ?? 0) + (value ?? 0)
+    }
+
+    for (const [key, value] of Object.entries(bonusStats)) {
+      total[key] = (total[key] ?? 0) + (value ?? 0)
+    }
+  }
+
+  return total
+}
+
+function getFinalStats(player) {
+  const equipmentStats = getEquipmentStats(player)
+  const base = player?.baseStats ?? {}
+
+  return {
+    maxHp: (base.maxHp ?? 0) + (equipmentStats.maxHp ?? 0),
+    maxMp: (base.maxMp ?? 0) + (equipmentStats.maxMp ?? 0),
+    damage: (base.damage ?? 0) + (equipmentStats.damage ?? 0),
+    defense: (base.defense ?? 0) + (equipmentStats.defense ?? 0),
+    critChance: (base.critChance ?? 0) + (equipmentStats.critChance ?? 0),
+    critDamage: (base.critDamage ?? 1) + (equipmentStats.critDamage ?? 0),
+    dodgeChance: (base.dodgeChance ?? 0) + (equipmentStats.dodgeChance ?? 0),
+    lifesteal: (base.lifesteal ?? 0) + (equipmentStats.lifesteal ?? 0),
+    damageReduction:
+      (base.damageReduction ?? 0) + (equipmentStats.damageReduction ?? 0),
+    shield: (base.shield ?? 0) + (equipmentStats.shield ?? 0),
+    physicalBonus: (base.physicalBonus ?? 0) + (equipmentStats.physicalBonus ?? 0),
+    spiritualBonus:
+      (base.spiritualBonus ?? 0) + (equipmentStats.spiritualBonus ?? 0),
+    trueBonus: (base.trueBonus ?? 0) + (equipmentStats.trueBonus ?? 0),
+    physicalResist:
+      (base.physicalResist ?? 0) + (equipmentStats.physicalResist ?? 0),
+    spiritualResist:
+      (base.spiritualResist ?? 0) + (equipmentStats.spiritualResist ?? 0),
+    trueResist: (base.trueResist ?? 0) + (equipmentStats.trueResist ?? 0),
+    hitChance: (base.hitChance ?? 1) + (equipmentStats.hitChance ?? 0),
+    antiCritChance:
+      (base.antiCritChance ?? 0) + (equipmentStats.antiCritChance ?? 0),
+    realmMultiplier:
+      (base.realmMultiplier ?? 1) + (equipmentStats.realmMultiplier ?? 0),
+  }
+}
+
+function toNumber(value, fallback = 0) {
+  return Number.isFinite(value) ? value : fallback
+}
+
+function toNonNegativeNumber(value, fallback = 0) {
+  return Math.max(0, toNumber(value, fallback))
+}
+
+function toPositiveNumber(value, fallback = 1) {
+  return Math.max(1, toNumber(value, fallback))
+}
+
+function normalizeEntity(entity = {}) {
+  const hp = toNonNegativeNumber(entity.hp, 0)
+  const maxHp = toPositiveNumber(entity.maxHp, hp || 1)
+  const mp = toNonNegativeNumber(entity.mp, 0)
+  const maxMp = Math.max(0, toNumber(entity.maxMp, mp))
+  const damage = toNonNegativeNumber(entity.damage, 0)
+  const defense = toNonNegativeNumber(entity.defense, 0)
+
+  return {
+    id: entity.id ?? null,
+    name: entity.name ?? 'Mục tiêu',
+    type: entity.type ?? 'unit',
+    hp: Math.min(hp, maxHp),
+    maxHp,
+    mp: Math.min(mp, maxMp),
+    maxMp,
+    damage,
+    defense,
+  }
+}
+
+function calculateDamage(attacker, defender) {
+  const rawDamage = attacker.damage - defender.defense
+  return Math.max(1, rawDamage)
+}
+
+function resolveAttack(attackerInput, defenderInput) {
+  const attacker = normalizeEntity(attackerInput)
+  const defender = normalizeEntity(defenderInput)
+
+  if (attacker.hp <= 0) {
+    return {
+      damage: 0,
+      attackerNext: { ...attacker },
+      defenderNext: { ...defender },
+      isDefenderDead: defender.hp <= 0,
+      log: `${attacker.name} đã mất sức chiến đấu.`,
+    }
+  }
+
+  if (defender.hp <= 0) {
+    return {
+      damage: 0,
+      attackerNext: { ...attacker },
+      defenderNext: { ...defender },
+      isDefenderDead: true,
+      log: `${defender.name} đã bị đánh bại.`,
+    }
+  }
+
+  const damage = calculateDamage(attacker, defender)
+  const defenderNextHp = Math.max(0, defender.hp - damage)
+
+  return {
+    damage,
+    attackerNext: { ...attacker },
+    defenderNext: {
+      ...defender,
+      hp: defenderNextHp,
+    },
+    isDefenderDead: defenderNextHp <= 0,
+    log: `${attacker.name} gây ${damage} sát thương lên ${defender.name}.`,
+  }
+}
+
+function resolveCombatRound(playerInput, enemyInput) {
+  const player = normalizeEntity(playerInput)
+  const enemy = normalizeEntity(enemyInput)
+
+  if (player.hp <= 0) {
+    return {
+      playerAttack: null,
+      enemyAttack: null,
+      nextPlayer: { ...player, hp: 0 },
+      nextEnemy: { ...enemy },
+      isPlayerDead: true,
+      isEnemyDead: enemy.hp <= 0,
+      logs: ['Bạn đã mất sức chiến đấu.'],
+    }
+  }
+
+  if (enemy.hp <= 0) {
+    return {
+      playerAttack: null,
+      enemyAttack: null,
+      nextPlayer: { ...player },
+      nextEnemy: { ...enemy, hp: 0 },
+      isPlayerDead: false,
+      isEnemyDead: true,
+      logs: [`${enemy.name} đã bị đánh bại.`],
+    }
+  }
+
+  const playerAttack = resolveAttack(player, enemy)
+  const logs = [playerAttack.log]
+
+  if (playerAttack.isDefenderDead) {
+    return {
+      playerAttack,
+      enemyAttack: null,
+      nextPlayer: { ...playerAttack.attackerNext },
+      nextEnemy: { ...playerAttack.defenderNext },
+      isPlayerDead: false,
+      isEnemyDead: true,
+      logs,
+    }
+  }
+
+  const enemyAttack = resolveAttack(
+    playerAttack.defenderNext,
+    playerAttack.attackerNext
+  )
+  logs.push(enemyAttack.log)
+
+  return {
+    playerAttack,
+    enemyAttack,
+    nextPlayer: { ...enemyAttack.defenderNext },
+    nextEnemy: { ...enemyAttack.attackerNext },
+    isPlayerDead: enemyAttack.defenderNext.hp <= 0,
+    isEnemyDead: false,
+    logs,
+  }
+}
+
+function buildCombatEntityFromPlayer(player, finalStats) {
+  return normalizeEntity({
+    id: player?.id ?? 'player',
+    name: player?.name ?? 'Người chơi',
+    type: 'player',
+    hp: player?.hp ?? finalStats.maxHp ?? 1,
+    maxHp: finalStats.maxHp ?? 1,
+    mp: player?.mp ?? finalStats.maxMp ?? 0,
+    maxMp: finalStats.maxMp ?? 0,
+    damage: finalStats.damage ?? 0,
+    defense: finalStats.defense ?? 0,
+  })
+}
+
+function buildCombatEntityFromEnemy(enemy) {
+  return normalizeEntity({
+    id: enemy?.id ?? null,
+    name: enemy?.name ?? 'Quái',
+    type: enemy?.type ?? 'enemy',
+    hp: enemy?.hp ?? 1,
+    maxHp: enemy?.maxHp ?? enemy?.hp ?? 1,
+    mp: enemy?.mp ?? 0,
+    maxMp: enemy?.maxMp ?? enemy?.mp ?? 0,
+    damage: enemy?.damage ?? 0,
+    defense: enemy?.defense ?? 0,
+  })
+}
+
+function createMonsterByStage(stage) {
+  return {
+    id: `monster_${stage}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    type: 'monster',
+    name: `Quái Phàm Nhân tầng ${stage}`,
+    realm: REALM_MORTAL,
+    stage,
+    hp: stage * 100,
+    maxHp: stage * 100,
+    damage: stage,
+    defense: Math.floor(stage / 2),
+    rewardExp: 10,
+    rewardSpiritStones: 1,
+    damageType: 'physical',
+    critChance: 0,
+    critDamage: 1.5,
+    dodgeChance: 0,
+    lifesteal: 0,
+    damageReduction: 0,
+    shield: 0,
+  }
+}
+
+function createRandomFloor1Monster() {
+  const stage = Math.floor(Math.random() * 10) + 1
+  return createMonsterByStage(stage)
+}
+
+function createBoss(floor = 1) {
+  if (floor === 2) {
+    return {
+      id: `boss_floor_2_${Date.now()}`,
+      type: 'boss',
+      name: 'Boss Bí Cảnh Tầng 2',
+      realm: REALM_MORTAL,
+      stage: 10,
+      hp: 3000,
+      maxHp: 3000,
+      damage: 30,
+      defense: 8,
+      rewardExp: 50,
+      damageType: 'physical',
+      critChance: 0.08,
+      critDamage: 1.7,
+      dodgeChance: 0.03,
+      lifesteal: 0,
+      damageReduction: 0.05,
+      shield: 20,
+    }
+  }
+
+  return {
+    id: `boss_floor_1_${Date.now()}`,
+    type: 'boss',
+    name: 'Boss Bí Cảnh',
+    realm: REALM_MORTAL,
+    stage: 10,
+    hp: 3000,
+    maxHp: 3000,
+    damage: 30,
+    defense: 5,
+    rewardExp: 50,
+    damageType: 'physical',
+    critChance: 0.05,
+    critDamage: 1.5,
+    dodgeChance: 0.02,
+    lifesteal: 0,
+    damageReduction: 0.03,
+    shield: 10,
+  }
+}
+
+function getBossDrop(floor = 1) {
+  const roll = Math.random()
+
+  if (floor === 1) {
+    if (roll < 0.2) {
+      return {
+        herbs: 1,
+        spiritStones: 0,
+        message: 'Boss rơi 1 dược thảo.',
+      }
+    }
+
+    return {
+      herbs: 0,
+      spiritStones: 10,
+      message: 'Boss rơi 10 linh thạch.',
+    }
+  }
+
+  if (roll < 0.5) {
+    return {
+      herbs: 1,
+      spiritStones: 0,
+      message: 'Boss tầng 2 rơi 1 dược thảo.',
+    }
+  }
+
+  return {
+    herbs: 0,
+    spiritStones: 10,
+    message: 'Boss tầng 2 rơi 10 linh thạch.',
+  }
+}
+
+function spawnFloor1Enemy(nextKillCount) {
+  if (nextKillCount > 0 && nextKillCount % 10 === 0) {
+    return createBoss(1)
+  }
+
+  return createRandomFloor1Monster()
+}
+
+function normalizeSaveData(rawSaveData) {
+  const saveData =
+    rawSaveData && typeof rawSaveData === 'object' ? rawSaveData : {}
+
+  return {
+    ...saveData,
+    player: saveData.player
+      ? {
+          ...saveData.player,
+          realm: normalizeRealm(saveData.player.realm),
+        }
+      : createDefaultPlayer(),
+    herbGarden: saveData.herbGarden || createDefaultHerbGarden(),
+    crafting: saveData.crafting ?? null,
+    message: saveData.message || 'Bắt đầu con đường tu luyện.',
+    logs:
+      Array.isArray(saveData.logs) && saveData.logs.length > 0
+        ? saveData.logs
+        : ['Bắt đầu con đường tu luyện.'],
+    currentDungeonFloor: saveData.currentDungeonFloor ?? null,
+    currentEnemy:
+      saveData.currentEnemy && typeof saveData.currentEnemy === 'object'
+        ? saveData.currentEnemy
+        : null,
+    killCount: Number(saveData.killCount) || 0,
+    dungeonCooldownUntil: saveData.dungeonCooldownUntil ?? null,
+    combatLogs: sanitizeCombatLogs(saveData.combatLogs),
+  }
+}
+
+async function runPlayerAction(uid, resolver) {
+  const ref = db.collection('users').doc(uid)
+
+  const result = await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref)
+    const data = snap.exists ? snap.data() : {}
+    const normalizedSave = normalizeSaveData(data?.saveData)
+    const resolved = await Promise.resolve(resolver(normalizedSave))
+
+    const safeMessage =
+      typeof resolved?.message === 'string' && resolved.message.trim()
+        ? resolved.message
+        : 'Không có thay đổi.'
+    const safeLogs = sanitizeLogs(normalizedSave.logs, safeMessage)
+    const saveDataPatch =
+      resolved?.saveDataPatch && typeof resolved.saveDataPatch === 'object'
+        ? resolved.saveDataPatch
+        : {}
+
+    const payload = {
+      ...normalizedSave,
+      ...saveDataPatch,
+      player: resolved?.player || normalizedSave.player,
+      herbGarden: resolved?.herbGarden || normalizedSave.herbGarden,
+      crafting:
+        resolved && Object.prototype.hasOwnProperty.call(resolved, 'crafting')
+          ? resolved.crafting
+          : normalizedSave.crafting,
+      message: safeMessage,
+      logs: safeLogs,
+      combatLogs: sanitizeCombatLogs(
+        saveDataPatch.combatLogs ?? normalizedSave.combatLogs
+      ),
+    }
+
+    transaction.set(
+      ref,
+      {
+        email: data?.email || '',
+        role: data?.role || 'player',
+        profile: data?.profile || { displayName: '' },
+        saveData: payload,
+        updatedAt: FieldValue.serverTimestamp(),
+        lastActionAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    )
+
+    return {
+      ok: Boolean(resolved?.ok),
+      message: safeMessage,
+      player: payload.player,
+      herbGarden: payload.herbGarden,
+      crafting: payload.crafting,
+      logs: safeLogs,
+      currentDungeonFloor: payload.currentDungeonFloor,
+      currentEnemy: payload.currentEnemy,
+      killCount: payload.killCount,
+      dungeonCooldownUntil: payload.dungeonCooldownUntil,
+      combatLogs: payload.combatLogs,
+    }
+  })
+
+  return result
+}
+
+export const cultivateAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Bạn chưa đăng nhập.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => ({
+        ok: true,
+        player: {
+          ...saveData.player,
+          realm: normalizeRealm(saveData.player?.realm),
+          exp: (Number(saveData.player?.exp) || 0) + 1,
+        },
+        herbGarden: saveData.herbGarden,
+        crafting: saveData.crafting,
+        message: 'Bạn tu luyện và nhận 1 EXP.',
+      }))
+    } catch (error) {
+      console.error('cultivateAction error:', error)
+      throw new HttpsError('internal', error?.message || 'Lỗi server khi tu luyện.')
+    }
+  }
+)
+
+export const breakthroughAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Bạn chưa đăng nhập.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = breakthrough(saveData.player)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Đột phá thất bại.',
+        }
+      })
+    } catch (error) {
+      console.error('breakthroughAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Lỗi server khi đột phá.'
+      )
+    }
+  }
+)
+
+export const upgradeHerbGardenAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = unlockHerbGardenSlot(saveData.player, saveData.herbGarden)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: result?.herbGarden || saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong the mo them o linh dien.',
+        }
+      })
+    } catch (error) {
+      console.error('upgradeHerbGardenAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi mo them o linh dien.'
+      )
+    }
+  }
+)
+
+export const plantHerbSeedAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const slotIndex = Number(request.data?.slotIndex)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = plantHerbSeed(saveData.herbGarden, slotIndex, Date.now())
+
+        return {
+          ok: Boolean(result?.ok),
+          player: saveData.player,
+          herbGarden: result?.herbGarden || saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong the gieo hat giong.',
+        }
+      })
+    } catch (error) {
+      console.error('plantHerbSeedAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi gieo hat giong.'
+      )
+    }
+  }
+)
+
+export const harvestHerbSlotAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const slotIndex = Number(request.data?.slotIndex)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = harvestHerbSlot(
+          saveData.player,
+          saveData.herbGarden,
+          slotIndex,
+          Date.now()
+        )
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: result?.herbGarden || saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong the thu hoach o nay.',
+        }
+      })
+    } catch (error) {
+      console.error('harvestHerbSlotAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi thu hoach duoc thao.'
+      )
+    }
+  }
+)
+
+export const harvestAllHerbsAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = harvestAllReadyHerbs(
+          saveData.player,
+          saveData.herbGarden,
+          Date.now()
+        )
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: result?.herbGarden || saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong co o nao san sang thu hoach.',
+        }
+      })
+    } catch (error) {
+      console.error('harvestAllHerbsAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi thu hoach toan bo.'
+      )
+    }
+  }
+)
+
+export const startAlchemyCraftAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const recipeId = String(request.data?.recipeId || '').trim()
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        if (saveData.crafting) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Lo dan dang ban.',
+          }
+        }
+
+        const result = startAlchemyCraft(saveData.player, recipeId, Date.now())
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: result?.crafting ?? saveData.crafting,
+          message: result?.message || 'Khong the bat dau luyen dan.',
+        }
+      })
+    } catch (error) {
+      console.error('startAlchemyCraftAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi bat dau luyen dan.'
+      )
+    }
+  }
+)
+
+export const claimAlchemyCraftAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        if (!saveData.crafting) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: null,
+            message: 'Khong co dan duoc nao de nhan.',
+          }
+        }
+
+        if (!isAlchemyCraftComplete(saveData.crafting, Date.now())) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Dan duoc van dang luyen.',
+          }
+        }
+
+        const result = finishAlchemyCraft(saveData.player, saveData.crafting)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: result?.ok ? null : saveData.crafting,
+          message: result?.message || 'Khong the nhan dan duoc.',
+        }
+      })
+    } catch (error) {
+      console.error('claimAlchemyCraftAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi nhan dan duoc.'
+      )
+    }
+  }
+)
+
+export const enterDungeonAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const floor = Number(request.data?.floor)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Bạn chưa đăng nhập.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        if (floor !== 1 && floor !== 2) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Tầng bí cảnh không hợp lệ.',
+            saveDataPatch: {
+              combatLogs: saveData.combatLogs,
+            },
+          }
+        }
+
+        if (saveData.currentDungeonFloor) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Bạn đang ở trong bí cảnh.',
+            saveDataPatch: {
+              combatLogs: saveData.combatLogs,
+            },
+          }
+        }
+
+        const enemy = floor === 1 ? createRandomFloor1Monster() : createBoss(2)
+        const combatLogs = sanitizeCombatLogs([
+          `⚔️ Bạn tiến vào Bí Cảnh tầng ${floor}.`,
+          `👹 Gặp ${enemy.name}.`,
+        ])
+
+        return {
+          ok: true,
+          player: saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: `Bạn tiến vào Bí Cảnh tầng ${floor}.`,
+          saveDataPatch: {
+            currentDungeonFloor: floor,
+            currentEnemy: enemy,
+            killCount: 0,
+            dungeonCooldownUntil: null,
+            combatLogs,
+          },
+        }
+      })
+    } catch (error) {
+      console.error('enterDungeonAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Lỗi server khi vào bí cảnh.'
+      )
+    }
+  }
+)
+
+export const leaveDungeonAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Bạn chưa đăng nhập.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const combatLogs = sanitizeCombatLogs([
+          ...saveData.combatLogs,
+          '🚪 Bạn rời khỏi bí cảnh.',
+        ])
+
+        return {
+          ok: true,
+          player: saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: 'Bạn rời khỏi bí cảnh.',
+          saveDataPatch: {
+            currentDungeonFloor: null,
+            currentEnemy: null,
+            killCount: 0,
+            dungeonCooldownUntil: null,
+            combatLogs,
+          },
+        }
+      })
+    } catch (error) {
+      console.error('leaveDungeonAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Lỗi server khi rời bí cảnh.'
+      )
+    }
+  }
+)
+
+export const attackDungeonEnemyAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Bạn chưa đăng nhập.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        if (!saveData.currentEnemy || !saveData.currentDungeonFloor) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Hiện không có mục tiêu trong bí cảnh.',
+            saveDataPatch: {
+              combatLogs: sanitizeCombatLogs([
+                ...saveData.combatLogs,
+                'Không có mục tiêu để tấn công.',
+              ]),
+            },
+          }
+        }
+
+        if ((saveData.player?.hp ?? 0) <= 0) {
+          return {
+            ok: false,
+            player: {
+              ...saveData.player,
+              hp: 0,
+            },
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Bạn đã trọng thương, bị đẩy ra khỏi bí cảnh.',
+            saveDataPatch: {
+              currentDungeonFloor: null,
+              currentEnemy: null,
+              killCount: 0,
+              dungeonCooldownUntil: null,
+              combatLogs: sanitizeCombatLogs([
+                ...saveData.combatLogs,
+                '💀 Bạn đã trọng thương và bị đẩy ra khỏi bí cảnh.',
+              ]),
+            },
+          }
+        }
+
+        const finalStats = getFinalStats(saveData.player)
+        const playerEntity = buildCombatEntityFromPlayer(saveData.player, finalStats)
+        const enemyEntity = buildCombatEntityFromEnemy(saveData.currentEnemy)
+        const result = resolveCombatRound(playerEntity, enemyEntity)
+        const combatLogs = [
+          ...saveData.combatLogs,
+          ...result.logs.map((text, index) =>
+            index === 0 ? `🗡️ ${text}` : `👹 ${text}`
+          ),
+        ]
+
+        if (result.isEnemyDead) {
+          if (saveData.currentEnemy.type === 'monster') {
+            const nextKillCount = (Number(saveData.killCount) || 0) + 1
+            const nextEnemy =
+              saveData.currentDungeonFloor === 1
+                ? spawnFloor1Enemy(nextKillCount)
+                : createBoss(2)
+
+            return {
+              ok: true,
+              player: {
+                ...saveData.player,
+                hp: result.nextPlayer.hp,
+                exp: (Number(saveData.player?.exp) || 0) + 10,
+                spiritStones: (Number(saveData.player?.spiritStones) || 0) + 1,
+              },
+              herbGarden: saveData.herbGarden,
+              crafting: saveData.crafting,
+              message: `Bạn đánh bại ${saveData.currentEnemy.name}, nhận 10 EXP và 1 linh thạch.`,
+              saveDataPatch: {
+                currentEnemy: nextEnemy,
+                killCount: nextKillCount,
+                combatLogs: sanitizeCombatLogs([
+                  ...combatLogs,
+                  `🔥 Bạn đánh bại ${saveData.currentEnemy.name}.`,
+                  '🎁 Nhận 10 EXP và 1 linh thạch.',
+                  `👹 Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`,
+                ]),
+              },
+            }
+          }
+
+          const drop = getBossDrop(saveData.currentDungeonFloor)
+          const nextEnemy =
+            saveData.currentDungeonFloor === 1
+              ? createRandomFloor1Monster()
+              : createBoss(2)
+
+          return {
+            ok: true,
+            player: {
+              ...saveData.player,
+              hp: result.nextPlayer.hp,
+              exp:
+                (Number(saveData.player?.exp) || 0) +
+                (Number(saveData.currentEnemy?.rewardExp) || 0),
+              spiritStones:
+                (Number(saveData.player?.spiritStones) || 0) +
+                (Number(drop.spiritStones) || 0),
+              herbs:
+                (Number(saveData.player?.herbs) || 0) + (Number(drop.herbs) || 0),
+            },
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: `Bạn đánh bại ${saveData.currentEnemy.name}, nhận ${
+              saveData.currentEnemy?.rewardExp ?? 0
+            } EXP. ${drop.message}`,
+            saveDataPatch: {
+              currentEnemy: nextEnemy,
+              combatLogs: sanitizeCombatLogs([
+                ...combatLogs,
+                `🔥 Bạn đánh bại ${saveData.currentEnemy.name}.`,
+                `🎁 Nhận ${saveData.currentEnemy?.rewardExp ?? 0} EXP, +${
+                  drop.spiritStones ?? 0
+                } linh thạch, +${drop.herbs ?? 0} dược thảo.`,
+                `👹 Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`,
+              ]),
+            },
+          }
+        }
+
+        if (result.isPlayerDead) {
+          return {
+            ok: false,
+            player: {
+              ...saveData.player,
+              hp: 0,
+            },
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Bạn bị đánh bại và bị đẩy ra khỏi bí cảnh.',
+            saveDataPatch: {
+              currentDungeonFloor: null,
+              currentEnemy: null,
+              killCount: 0,
+              dungeonCooldownUntil: null,
+              combatLogs: sanitizeCombatLogs([
+                ...combatLogs,
+                '💀 Bạn đã bị đánh bại và bị đẩy ra khỏi bí cảnh.',
+              ]),
+            },
+          }
+        }
+
+        return {
+          ok: true,
+          player: {
+            ...saveData.player,
+            hp: result.nextPlayer.hp,
+          },
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: 'Chiến đấu tiếp diễn.',
+          saveDataPatch: {
+            currentEnemy: {
+              ...saveData.currentEnemy,
+              hp: result.nextEnemy.hp,
+              maxHp: result.nextEnemy.maxHp ?? saveData.currentEnemy.maxHp,
+              shield: result.nextEnemy.shield ?? 0,
+            },
+            combatLogs: sanitizeCombatLogs(combatLogs),
+          },
+        }
+      })
+    } catch (error) {
+      console.error('attackDungeonEnemyAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Lỗi server khi chiến đấu trong bí cảnh.'
+      )
+    }
+  }
+)

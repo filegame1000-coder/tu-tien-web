@@ -1,6 +1,4 @@
 import { useEffect, useMemo, useState } from 'react'
-import { doc, setDoc } from 'firebase/firestore'
-import { auth, db } from '../firebase'
 import { clearGameSave, loadGame, saveGame } from '../utils/save'
 import {
   applyExpGain,
@@ -17,21 +15,6 @@ import {
 } from '../systems/monsters'
 import { attackMonster, attackPlayer } from '../systems/combat'
 import { equipItem, getEquippedBonuses } from '../systems/equipment'
-
-async function saveToCloud(data) {
-  const user = auth.currentUser
-  if (!user) return
-
-  await setDoc(
-    doc(db, 'users', user.uid),
-    {
-      email: user.email || '',
-      ...data,
-      updatedAt: Date.now()
-    },
-    { merge: true }
-  )
-}
 
 export function useGameState({ user, authReady }) {
   // ✅ FIX QUAN TRỌNG: phải gọi function
@@ -188,7 +171,6 @@ export function useGameState({ user, authReady }) {
     }
 
     saveGame(data)
-    saveToCloud(data)
   }, [player, autoTraining, currentMonster, log, isLoaded, user])
 
   return {

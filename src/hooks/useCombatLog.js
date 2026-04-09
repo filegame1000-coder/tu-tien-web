@@ -11,9 +11,14 @@ export function useCombatLog() {
     setLogs([])
   }, [])
 
+  const replaceCombatLog = useCallback((nextLogs) => {
+    setLogs(Array.isArray(nextLogs) ? nextLogs.slice(-40) : [])
+  }, [])
+
   return {
     combatLogs: logs,
     pushCombatLog,
     clearCombatLog,
+    replaceCombatLog,
   }
 }

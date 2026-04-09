@@ -1,4 +1,4 @@
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore'
+import { doc, getDoc } from 'firebase/firestore'
 import { db } from '../firebase'
 import { loadGame, saveGame } from '../utils/save'
 
@@ -28,18 +28,4 @@ export async function savePlayerSave(uid, payload) {
   if (!uid || !payload) return
 
   saveGame(payload, uid)
-
-  try {
-    await setDoc(
-      doc(db, 'users', uid),
-      {
-        saveData: payload,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    )
-  } catch (error) {
-    console.error('Lỗi save cloud:', error)
-    throw error
-  }
 }

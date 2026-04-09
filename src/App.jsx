@@ -49,7 +49,7 @@ function ProgressBar({ value, max = 100, label }) {
   )
 }
 
-function CultivationScreen({ player, actions, breakthroughCost, logs, finalStats }) {
+function CultivationScreen({ player, actions, breakthroughCost, logs, finalStats, actionState }) {
   const exp = Number(player?.exp) || 0
   const stage = Number(player?.stage) || 1
   const realm = player?.realm || 'Phàm Nhân'
@@ -129,11 +129,19 @@ function CultivationScreen({ player, actions, breakthroughCost, logs, finalStats
               </div>
 
               <div className="action-row">
-                <button className="dao-btn dao-btn-primary" onClick={actions.cultivate}>
-                  Tu luyện
+                <button
+                  className="dao-btn dao-btn-primary"
+                  onClick={actions.cultivate}
+                  disabled={actionState?.isActionLocked}
+                >
+                  {actionState?.isCultivating ? 'Đang tu luyện...' : 'Tu luyện'}
                 </button>
-                <button className="dao-btn dao-btn-accent" onClick={actions.breakthrough}>
-                  Đột phá
+                <button
+                  className="dao-btn dao-btn-accent"
+                  onClick={actions.breakthrough}
+                  disabled={actionState?.isActionLocked}
+                >
+                  {actionState?.isBreakingThrough ? 'Đang đột phá...' : 'Đột phá'}
                 </button>
               </div>
             </div>
@@ -188,6 +196,7 @@ export default function App() {
     message,
     crafting,
     craftingRemainMs,
+    actionState,
   } = usePlayer(user)
 
   if (!ready) {
@@ -239,7 +248,7 @@ export default function App() {
 
         <div className="dao-layout">
           <aside className="left-column">
-            <PlayerPanel player={player} finalStats={finalStats} actions={actions} />
+            <PlayerPanel player={player} finalStats={finalStats} actions={actions} actionState={actionState} />
           </aside>
 
           <main className="right-column">
@@ -250,6 +259,7 @@ export default function App() {
                 breakthroughCost={breakthroughCost}
                 logs={logs}
                 finalStats={finalStats}
+                actionState={actionState}
               />
             )}
 

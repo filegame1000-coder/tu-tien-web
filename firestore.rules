@@ -1,0 +1,55 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isOwner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
+
+    function validProfile(profile) {
+      return profile is map
+        && profile.keys().hasOnly(['displayName'])
+        && profile.displayName is string
+        && profile.displayName.size() <= 40;
+    }
+
+    match /users/{uid} {
+      allow read: if isOwner(uid);
+
+      allow create: if isOwner(uid)
+        && request.resource.data.keys().hasOnly([
+          'email',
+          'role',
+          'profile',
+          'createdAt',
+          'updatedAt',
+          'saveData'
+        ])
+        && request.resource.data.email is string
+        && request.resource.data.role == 'player'
+        && validProfile(request.resource.data.profile)
+        && request.resource.data.saveData == null;
+
+      allow update: if isOwner(uid)
+        && request.resource.data.keys().hasOnly([
+          'email',
+          'role',
+          'profile',
+          'createdAt',
+          'updatedAt',
+          'saveData'
+        ])
+        && request.resource.data.diff(resource.data).changedKeys().hasOnly([
+          'profile',
+          'updatedAt'
+        ])
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.saveData == resource.data.saveData
+        && validProfile(request.resource.data.profile);
+
+      allow delete: if false;
+    }
+  }
+}

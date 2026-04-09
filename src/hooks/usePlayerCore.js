@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   createPlayer,
-  renamePlayer,
   setInitialPlayerName,
 } from '../systems/player'
 import { cultivate, breakthrough, getBreakthroughCost } from '../systems/cultivation'
@@ -125,41 +124,16 @@ export function usePlayerCore(
   }
 
   function handleSetInitialName(newName) {
-    let success = false
+    const result = setInitialPlayerName(player, newName)
 
-    setPlayer((prev) => {
-      const result = setInitialPlayerName(prev, newName)
-
-      if (!result.ok) {
-        pushLog(result.message)
-        return prev
-      }
-
-      success = true
+    if (!result.ok) {
       pushLog(result.message)
-      return result.player
-    })
+      return false
+    }
 
-    return success
-  }
-
-  function handleRename(newName) {
-    let success = false
-
-    setPlayer((prev) => {
-      const result = renamePlayer(prev, newName)
-
-      if (!result.ok) {
-        pushLog(result.message)
-        return prev
-      }
-
-      success = true
-      pushLog(result.message)
-      return result.player
-    })
-
-    return success
+    setPlayer(result.player)
+    pushLog(result.message)
+    return true
   }
 
   function handleEquipItem(instanceId) {
@@ -296,7 +270,6 @@ export function usePlayerCore(
       cultivate: handleCultivate,
       breakthrough: handleBreakthrough,
       setInitialName: handleSetInitialName,
-      rename: handleRename,
       equipItem: handleEquipItem,
       unequipItem: handleUnequipItem,
       useItem: handleUseItem,

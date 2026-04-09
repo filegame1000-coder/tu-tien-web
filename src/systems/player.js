@@ -1,3 +1,4 @@
+import { REALM_MORTAL } from './cultivation'
 import { createEquipmentInstance } from './equipment'
 
 export const DEFAULT_PLAYER_NAME = 'Vô Danh'
@@ -7,7 +8,7 @@ export function createPlayer() {
   return {
     id: 'player_001',
     name: '',
-    realm: 'Phàm Nhân',
+    realm: REALM_MORTAL,
     stage: 1,
     exp: 0,
     spiritStones: 1200,

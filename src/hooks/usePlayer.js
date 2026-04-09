@@ -1,17 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { loadGame, saveGame } from '../utils/save'
-import { loadPlayerSave, savePlayerSave } from '../services/saveRepository'
-
 import {
-  createPlayer,
-  renamePlayer,
-  setInitialPlayerName,
-} from '../systems/player'
+  cultivateAction,
+  breakthroughAction,
+  upgradeHerbGardenAction,
+  plantHerbSeedAction,
+  harvestHerbSlotAction,
+  harvestAllHerbsAction,
+  startAlchemyCraftAction,
+  claimAlchemyCraftAction,
+} from '../services/gameApi'
+
+import { createPlayer, setInitialPlayerName } from '../systems/player'
 
 import {
   cultivate,
   breakthrough,
   getBreakthroughCost,
+  normalizeRealm,
 } from '../systems/cultivation'
 
 import { equipItem, unequipItem } from '../systems/equipment'
@@ -34,23 +40,30 @@ import {
   unlockHerbGardenSlot,
 } from '../systems/herbGarden'
 
-import { useGameLog } from './useGameLog'
-import { useDungeonState } from './useDungeonState'
 import { useDungeonCombat } from './useDungeonCombat'
 import { useCombatLog } from './useCombatLog'
+import { canEnterDungeon, formatCooldown } from '../systems/dungeon'
 
 function normalizeSaveData(raw) {
   if (!raw || typeof raw !== 'object') return null
 
+  const normalizedPlayer = raw.player
+    ? {
+        ...raw.player,
+        realm: normalizeRealm(raw.player.realm),
+      }
+    : createPlayer()
+
   return {
-    player: raw.player || createPlayer(),
+    player: normalizedPlayer,
     herbGarden: normalizeHerbGarden(raw.herbGarden || createHerbGarden()),
     crafting: raw.crafting ?? null,
-    message: raw.message || 'Bắt đầu con đường tu luyện.',
+    message: raw.message || 'Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.',
     logs:
       Array.isArray(raw.logs) && raw.logs.length > 0
         ? raw.logs
-        : ['Bắt đầu con đường tu luyện.'],
+        : ['Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.'],
+    combatLogs: Array.isArray(raw.combatLogs) ? raw.combatLogs.slice(-40) : [],
     activeTab: raw.activeTab || 'cultivation',
     currentDungeonFloor: raw.currentDungeonFloor ?? null,
     currentEnemy: raw.currentEnemy ?? null,
@@ -64,115 +77,134 @@ function buildDefaultSave() {
 }
 
 export function usePlayer(user) {
-  const localSaved = useMemo(() => {
+  const saved = useMemo(() => {
     return normalizeSaveData(loadGame(user?.uid)) || buildDefaultSave()
   }, [user?.uid])
 
-  const [loading, setLoading] = useState(!!user)
-  const [hydrated, setHydrated] = useState(!user)
-
-  const [player, setPlayer] = useState(localSaved.player || createPlayer())
-  const [crafting, setCrafting] = useState(localSaved.crafting ?? null)
+  const [player, setPlayer] = useState(saved.player || createPlayer())
+  const [crafting, setCrafting] = useState(saved.crafting ?? null)
   const [craftingRemainMs, setCraftingRemainMs] = useState(() =>
-    getAlchemyRemainingMs(localSaved.crafting ?? null)
+    getAlchemyRemainingMs(saved.crafting ?? null)
   )
   const [herbGarden, setHerbGarden] = useState(
-    normalizeHerbGarden(localSaved.herbGarden) || createHerbGarden()
+    normalizeHerbGarden(saved.herbGarden) || createHerbGarden()
   )
 
-  const {
-    message,
-    logs,
-    pushLog,
-    setMessage,
-    setLogs,
-  } = useGameLog(localSaved)
+  const [message, setMessage] = useState(
+    saved.message || 'Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.'
+  )
+  const [logs, setLogs] = useState(
+    Array.isArray(saved.logs) && saved.logs.length > 0
+      ? saved.logs
+      : ['Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.']
+  )
 
-  const dungeonState = useDungeonState(localSaved)
+  const [activeTab, setActiveTab] = useState(saved.activeTab || 'cultivation')
+  const [currentDungeonFloor, setCurrentDungeonFloor] = useState(
+    saved.currentDungeonFloor ?? null
+  )
+  const [currentEnemy, setCurrentEnemy] = useState(saved.currentEnemy ?? null)
+  const [killCount, setKillCount] = useState(saved.killCount ?? 0)
+  const [dungeonCooldownUntil, setDungeonCooldownUntil] = useState(
+    saved.dungeonCooldownUntil ?? null
+  )
+  const [pendingAction, setPendingAction] = useState(null)
 
-  const { combatLogs, pushCombatLog, clearCombatLog } = useCombatLog()
+  const { combatLogs, pushCombatLog, clearCombatLog, replaceCombatLog } = useCombatLog()
+  const actionInFlightRef = useRef(false)
+  const alchemyClaimInFlightRef = useRef(false)
+  const allowDevFallback = import.meta.env.DEV
 
   const finalStats = useMemo(() => getFinalStats(player), [player])
   const breakthroughCost = useMemo(() => getBreakthroughCost(player), [player])
   const needsInitialNaming = !String(player?.name || '').trim()
 
-  const saveTimerRef = useRef(null)
-  const loadVersionRef = useRef(0)
+  const cooldownText = useMemo(() => {
+    const check = canEnterDungeon(dungeonCooldownUntil)
+    if (check.ok) return 'CÃ³ thá»ƒ vÃ o bÃ­ cáº£nh'
+    return `Há»“i láº¡i sau: ${formatCooldown(check.remainMs)}`
+  }, [dungeonCooldownUntil])
+
+  const isCultivating = pendingAction === 'cultivate'
+  const isBreakingThrough = pendingAction === 'breakthrough'
+  const isActionLocked = isCultivating || isBreakingThrough
+
+  function pushLog(text) {
+    setLogs((prev) => [text, ...prev].slice(0, 20))
+    setMessage(text)
+  }
+
+  function applyServerActionResult(result) {
+    if (!result || typeof result !== 'object') return
+
+    if (result.player) {
+      setPlayer({
+        ...result.player,
+        realm: normalizeRealm(result.player.realm),
+      })
+    }
+
+    if (result.herbGarden) {
+      setHerbGarden(normalizeHerbGarden(result.herbGarden))
+    }
+
+    if (result.crafting !== undefined) {
+      setCrafting(result.crafting ?? null)
+      setCraftingRemainMs(getAlchemyRemainingMs(result.crafting ?? null))
+    }
+
+    if (Array.isArray(result.logs) && result.logs.length > 0) {
+      setLogs(result.logs)
+    }
+
+    if (result.message) {
+      setMessage(result.message)
+    }
+
+    if (Object.prototype.hasOwnProperty.call(result, 'currentDungeonFloor')) {
+      setCurrentDungeonFloor(result.currentDungeonFloor ?? null)
+    }
+
+    if (Object.prototype.hasOwnProperty.call(result, 'currentEnemy')) {
+      setCurrentEnemy(result.currentEnemy ?? null)
+    }
+
+    if (Object.prototype.hasOwnProperty.call(result, 'killCount')) {
+      setKillCount(Number(result.killCount) || 0)
+    }
+
+    if (Object.prototype.hasOwnProperty.call(result, 'dungeonCooldownUntil')) {
+      setDungeonCooldownUntil(result.dungeonCooldownUntil ?? null)
+    }
+  }
 
   useEffect(() => {
-    const nextLocal = normalizeSaveData(loadGame(user?.uid)) || buildDefaultSave()
+    const nextSaved = normalizeSaveData(loadGame(user?.uid)) || buildDefaultSave()
 
-    setPlayer(nextLocal.player || createPlayer())
-    setCrafting(nextLocal.crafting ?? null)
-    setCraftingRemainMs(getAlchemyRemainingMs(nextLocal.crafting ?? null))
+    setPlayer(nextSaved.player || createPlayer())
+    setCrafting(nextSaved.crafting ?? null)
+    setCraftingRemainMs(getAlchemyRemainingMs(nextSaved.crafting ?? null))
     setHerbGarden(
-      normalizeHerbGarden(nextLocal.herbGarden) || createHerbGarden()
+      normalizeHerbGarden(nextSaved.herbGarden) || createHerbGarden()
     )
-    setMessage(nextLocal.message || 'Bắt đầu con đường tu luyện.')
+
+    setMessage(nextSaved.message || 'Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.')
     setLogs(
-      Array.isArray(nextLocal.logs) && nextLocal.logs.length > 0
-        ? nextLocal.logs
-        : ['Bắt đầu con đường tu luyện.']
+      Array.isArray(nextSaved.logs) && nextSaved.logs.length > 0
+        ? nextSaved.logs
+        : ['Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.']
     )
-    dungeonState.setActiveTab(nextLocal.activeTab || 'cultivation')
-    dungeonState.setCurrentDungeonFloor(nextLocal.currentDungeonFloor ?? null)
-    dungeonState.setCurrentEnemy(nextLocal.currentEnemy ?? null)
-    dungeonState.setKillCount(nextLocal.killCount ?? 0)
-    dungeonState.setDungeonCooldownUntil(nextLocal.dungeonCooldownUntil ?? null)
-    clearCombatLog()
 
-    if (!user) {
-      setLoading(false)
-      setHydrated(true)
-      return
-    }
-
-    let active = true
-    const currentVersion = ++loadVersionRef.current
-
-    setLoading(true)
-    setHydrated(false)
-
-    ;(async () => {
-      try {
-        const cloudRaw = await loadPlayerSave(user.uid)
-        if (!active || currentVersion !== loadVersionRef.current) return
-
-        const cloudSaved = normalizeSaveData(cloudRaw) || nextLocal
-
-        setPlayer(cloudSaved.player || createPlayer())
-        setCrafting(cloudSaved.crafting ?? null)
-        setCraftingRemainMs(getAlchemyRemainingMs(cloudSaved.crafting ?? null))
-        setHerbGarden(
-          normalizeHerbGarden(cloudSaved.herbGarden) || createHerbGarden()
-        )
-        setMessage(cloudSaved.message || 'Bắt đầu con đường tu luyện.')
-        setLogs(
-          Array.isArray(cloudSaved.logs) && cloudSaved.logs.length > 0
-            ? cloudSaved.logs
-            : ['Bắt đầu con đường tu luyện.']
-        )
-        dungeonState.setActiveTab(cloudSaved.activeTab || 'cultivation')
-        dungeonState.setCurrentDungeonFloor(cloudSaved.currentDungeonFloor ?? null)
-        dungeonState.setCurrentEnemy(cloudSaved.currentEnemy ?? null)
-        dungeonState.setKillCount(cloudSaved.killCount ?? 0)
-        dungeonState.setDungeonCooldownUntil(
-          cloudSaved.dungeonCooldownUntil ?? null
-        )
-        clearCombatLog()
-      } catch (error) {
-        console.error('Lỗi khởi tạo dữ liệu người chơi:', error)
-      } finally {
-        if (!active || currentVersion !== loadVersionRef.current) return
-        setHydrated(true)
-        setLoading(false)
-      }
-    })()
-
-    return () => {
-      active = false
-    }
-  }, [user?.uid])
+    setActiveTab(nextSaved.activeTab || 'cultivation')
+    setCurrentDungeonFloor(nextSaved.currentDungeonFloor ?? null)
+    setCurrentEnemy(nextSaved.currentEnemy ?? null)
+    setKillCount(nextSaved.killCount ?? 0)
+    setDungeonCooldownUntil(nextSaved.dungeonCooldownUntil ?? null)
+    replaceCombatLog(nextSaved.combatLogs ?? [])
+    setPendingAction(null)
+    actionInFlightRef.current = false
+    alchemyClaimInFlightRef.current = false
+  }, [user?.uid, replaceCombatLog])
 
   useEffect(() => {
     if (!crafting) {
@@ -190,152 +222,239 @@ export function usePlayer(user) {
     return () => clearInterval(interval)
   }, [crafting])
 
+  async function handleClaimAlchemyCraft(silent = false) {
+    if (!crafting) return false
+
+    if (!user) {
+      const result = finishAlchemyCraft(player, crafting)
+
+      if (!result.ok) {
+        if (!silent) pushLog(result.message)
+        return false
+      }
+
+      setPlayer(result.player)
+      setCrafting(null)
+      setCraftingRemainMs(0)
+      if (!silent) pushLog(result.message)
+      return true
+    }
+
+    if (alchemyClaimInFlightRef.current) return false
+    alchemyClaimInFlightRef.current = true
+
+    try {
+      const result = await claimAlchemyCraftAction()
+
+      if (!result?.ok) {
+        if (!silent) {
+          pushLog(result?.message || 'Khong the nhan dan duoc.')
+        }
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Claim alchemy sync error:', error)
+      if (allowDevFallback) {
+        const result = finishAlchemyCraft(player, crafting)
+
+        if (!result.ok) {
+          if (!silent) pushLog(result.message)
+          return false
+        }
+
+        setPlayer(result.player)
+        setCrafting(null)
+        setCraftingRemainMs(0)
+        if (!silent) pushLog(result.message)
+        return true
+      }
+      if (!silent) {
+        pushLog('Khong ket noi duoc may chu luyen dan.')
+      }
+      return false
+    } finally {
+      alchemyClaimInFlightRef.current = false
+    }
+  }
+
   useEffect(() => {
     if (!crafting) return
 
-    if (isAlchemyCraftComplete(crafting)) {
-      setPlayer((prev) => {
-        const result = finishAlchemyCraft(prev, crafting)
+    if (!user) {
+      if (isAlchemyCraftComplete(crafting)) {
+        void handleClaimAlchemyCraft()
+        return
+      }
 
-        if (!result.ok) {
-          pushLog(result.message)
-          return prev
-        }
+      const remainMs = getAlchemyRemainingMs(crafting)
+      const timeout = setTimeout(() => {
+        void handleClaimAlchemyCraft()
+      }, remainMs)
 
-        pushLog(result.message)
-        return result.player
-      })
-
-      setCrafting(null)
-      setCraftingRemainMs(0)
-      return
+      return () => clearTimeout(timeout)
     }
+
+    if (alchemyClaimInFlightRef.current) return
 
     const remainMs = getAlchemyRemainingMs(crafting)
 
+    if (remainMs <= 0) {
+      void handleClaimAlchemyCraft()
+      return
+    }
+
     const timeout = setTimeout(() => {
-      setPlayer((prev) => {
-        const result = finishAlchemyCraft(prev, crafting)
-
-        if (!result.ok) {
-          pushLog(result.message)
-          return prev
-        }
-
-        pushLog(result.message)
-        return result.player
-      })
-
-      setCrafting(null)
-      setCraftingRemainMs(0)
+      void handleClaimAlchemyCraft()
     }, remainMs)
 
     return () => clearTimeout(timeout)
-  }, [crafting, pushLog])
+  }, [crafting, user])
 
   useEffect(() => {
-    if (!hydrated) return
-
     const payload = {
       player,
       herbGarden,
       crafting,
       message,
       logs,
-      activeTab: dungeonState.activeTab,
-      currentDungeonFloor: dungeonState.currentDungeonFloor,
-      currentEnemy: dungeonState.currentEnemy,
-      killCount: dungeonState.killCount,
-      dungeonCooldownUntil: dungeonState.dungeonCooldownUntil,
+      combatLogs,
+      activeTab,
+      currentDungeonFloor,
+      currentEnemy,
+      killCount,
+      dungeonCooldownUntil,
     }
 
     saveGame(payload, user?.uid)
-
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-
-    saveTimerRef.current = setTimeout(async () => {
-      if (!user) return
-
-      try {
-        await savePlayerSave(user.uid, payload)
-      } catch (error) {
-        console.error('Lỗi đồng bộ cloud:', error)
-      }
-    }, 500)
-
-    return () => {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    }
   }, [
-    hydrated,
     player,
     herbGarden,
     crafting,
     message,
     logs,
-    dungeonState.activeTab,
-    dungeonState.currentDungeonFloor,
-    dungeonState.currentEnemy,
-    dungeonState.killCount,
-    dungeonState.dungeonCooldownUntil,
+    combatLogs,
+    activeTab,
+    currentDungeonFloor,
+    currentEnemy,
+    killCount,
+    dungeonCooldownUntil,
     user,
   ])
 
-  function handleCultivate() {
-    setPlayer((prev) => cultivate(prev))
-    pushLog('Bạn tu luyện và nhận 1 EXP.')
-  }
+  async function handleCultivate() {
+    if (actionInFlightRef.current) return false
 
-  function handleBreakthrough() {
-    setPlayer((prev) => {
-      const result = breakthrough(prev)
+    if (!user) {
+      setPlayer((prev) => cultivate(prev))
+      pushLog('Báº¡n tu luyá»‡n vÃ  nháº­n 1 EXP.')
+      return true
+    }
 
-      if (!result.ok) {
-        pushLog(result.message)
-        return prev
+    actionInFlightRef.current = true
+    setPendingAction('cultivate')
+
+    try {
+      const result = await cultivateAction()
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Tu luyá»‡n tháº¥t báº¡i.')
+        return false
       }
 
-      pushLog(result.message)
-      return result.player
-    })
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Cultivate sync error:', error)
+      if (allowDevFallback) {
+        setPlayer((prev) => cultivate(prev))
+        pushLog('Ban tu luyen va nhan 1 EXP. [dev local]')
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu tu luyen.')
+      return false
+    } finally {
+      actionInFlightRef.current = false
+      setPendingAction(null)
+    }
+  }
+
+  async function handleBreakthrough() {
+    if (actionInFlightRef.current) return false
+
+    if (!user) {
+      let success = false
+
+      setPlayer((prev) => {
+        const result = breakthrough(prev)
+
+        if (!result.ok) {
+          pushLog(result.message)
+          return prev
+        }
+
+        success = true
+        pushLog(result.message)
+        return result.player
+      })
+
+      return success
+    }
+
+    actionInFlightRef.current = true
+    setPendingAction('breakthrough')
+
+    try {
+      const result = await breakthroughAction()
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Dot pha that bai.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (err) {
+      console.error('Breakthrough sync error:', err)
+      if (allowDevFallback) {
+        let success = false
+
+        setPlayer((prev) => {
+          const result = breakthrough(prev)
+
+          if (!result.ok) {
+            pushLog(result.message)
+            return prev
+          }
+
+          success = true
+          pushLog(`${result.message} [dev local]`)
+          return result.player
+        })
+
+        return success
+      }
+      pushLog('Khong ket noi duoc may chu dot pha.')
+      return false
+    } finally {
+      actionInFlightRef.current = false
+      setPendingAction(null)
+    }
   }
 
   function handleSetInitialName(newName) {
-    let success = false
+    const result = setInitialPlayerName(player, newName)
 
-    setPlayer((prev) => {
-      const result = setInitialPlayerName(prev, newName)
-
-      if (!result.ok) {
-        pushLog(result.message)
-        return prev
-      }
-
-      success = true
+    if (!result.ok) {
       pushLog(result.message)
-      return result.player
-    })
+      return false
+    }
 
-    return success
-  }
-
-  function handleRename(newName) {
-    let success = false
-
-    setPlayer((prev) => {
-      const result = renamePlayer(prev, newName)
-
-      if (!result.ok) {
-        pushLog(result.message)
-        return prev
-      }
-
-      success = true
-      pushLog(result.message)
-      return result.player
-    })
-
-    return success
+    setPlayer(result.player)
+    pushLog(result.message)
+    return true
   }
 
   function handleEquipItem(instanceId) {
@@ -373,7 +492,7 @@ export function usePlayer(user) {
       const result = useConsumable(prev, itemId)
 
       if (!result.ok) {
-        pushLog(result.message || 'Không thể sử dụng vật phẩm.')
+        pushLog(result.message || 'Khong the su dung vat pham.')
         return prev
       }
 
@@ -382,94 +501,272 @@ export function usePlayer(user) {
     })
   }
 
-  function handleCraftPill(recipeId) {
+  async function handleCraftPill(recipeId) {
     if (crafting) {
-      pushLog('Lò đan đang bận.')
+      pushLog('Lo dan dang ban.')
       return false
     }
 
-    const result = startAlchemyCraft(player, recipeId)
+    if (!user) {
+      const result = startAlchemyCraft(player, recipeId)
 
-    if (!result.ok) {
+      if (!result.ok) {
+        pushLog(result.message)
+        return false
+      }
+
+      setPlayer(result.player)
+      setCrafting(result.craftState)
+      setCraftingRemainMs(getAlchemyRemainingMs(result.craftState))
       pushLog(result.message)
-      return false
+      return true
     }
 
-    setPlayer(result.player)
-    setCrafting(result.craftState)
-    setCraftingRemainMs(getAlchemyRemainingMs(result.craftState))
-    pushLog(result.message)
+    try {
+      const result = await startAlchemyCraftAction(recipeId)
 
-    return true
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the bat dau luyen dan.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Start alchemy sync error:', error)
+      if (allowDevFallback) {
+        const result = startAlchemyCraft(player, recipeId)
+
+        if (!result.ok) {
+          pushLog(result.message)
+          return false
+        }
+
+        setPlayer(result.player)
+        setCrafting(result.craftState)
+        setCraftingRemainMs(getAlchemyRemainingMs(result.craftState))
+        pushLog(`${result.message} [dev local]`)
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu luyen dan.')
+      return false
+    }
   }
 
-  function handleUpgradeHerbGarden() {
-    const result = unlockHerbGardenSlot(player, herbGarden)
+  async function handleUpgradeHerbGarden() {
+    if (!user) {
+      const result = unlockHerbGardenSlot(player, herbGarden)
 
-    if (!result.ok) {
+      if (!result.ok) {
+        pushLog(result.message)
+        return false
+      }
+
+      setPlayer(result.player)
+      setHerbGarden(result.herbGarden)
       pushLog(result.message)
-      return false
+      return true
     }
 
-    setPlayer(result.player)
-    setHerbGarden(result.herbGarden)
-    pushLog(result.message)
-    return true
+    try {
+      const result = await upgradeHerbGardenAction()
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the mo them o linh dien.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Upgrade herb garden sync error:', error)
+      if (allowDevFallback) {
+        const result = unlockHerbGardenSlot(player, herbGarden)
+
+        if (!result.ok) {
+          pushLog(result.message)
+          return false
+        }
+
+        setPlayer(result.player)
+        setHerbGarden(result.herbGarden)
+        pushLog(`${result.message} [dev local]`)
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu linh dien.')
+      return false
+    }
   }
 
-  function handlePlantHerbSeed(slotIndex) {
-    const result = plantHerbSeed(herbGarden, slotIndex)
+  async function handlePlantHerbSeed(slotIndex) {
+    if (!user) {
+      const result = plantHerbSeed(herbGarden, slotIndex)
 
-    if (!result.ok) {
+      if (!result.ok) {
+        pushLog(result.message)
+        return false
+      }
+
+      setHerbGarden(result.herbGarden)
       pushLog(result.message)
-      return false
+      return true
     }
 
-    setHerbGarden(result.herbGarden)
-    pushLog(result.message)
-    return true
+    try {
+      const result = await plantHerbSeedAction(slotIndex)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the gieo hat giong.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Plant herb sync error:', error)
+      if (allowDevFallback) {
+        const result = plantHerbSeed(herbGarden, slotIndex)
+
+        if (!result.ok) {
+          pushLog(result.message)
+          return false
+        }
+
+        setHerbGarden(result.herbGarden)
+        pushLog(`${result.message} [dev local]`)
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu linh dien.')
+      return false
+    }
   }
 
-  function handleHarvestHerbSlot(slotIndex) {
-    const result = harvestHerbSlot(player, herbGarden, slotIndex)
+  async function handleHarvestHerbSlot(slotIndex) {
+    if (!user) {
+      const result = harvestHerbSlot(player, herbGarden, slotIndex)
 
-    if (!result.ok) {
+      if (!result.ok) {
+        pushLog(result.message)
+        return false
+      }
+
+      setPlayer(result.player)
+      setHerbGarden(result.herbGarden)
       pushLog(result.message)
-      return false
+      return true
     }
 
-    setPlayer(result.player)
-    setHerbGarden(result.herbGarden)
-    pushLog(result.message)
-    return true
+    try {
+      const result = await harvestHerbSlotAction(slotIndex)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the thu hoach o nay.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Harvest herb slot sync error:', error)
+      if (allowDevFallback) {
+        const result = harvestHerbSlot(player, herbGarden, slotIndex)
+
+        if (!result.ok) {
+          pushLog(result.message)
+          return false
+        }
+
+        setPlayer(result.player)
+        setHerbGarden(result.herbGarden)
+        pushLog(`${result.message} [dev local]`)
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu linh dien.')
+      return false
+    }
   }
 
-  function handleHarvestAllHerbs() {
-    const result = harvestAllReadyHerbs(player, herbGarden)
+  async function handleHarvestAllHerbs() {
+    if (!user) {
+      const result = harvestAllReadyHerbs(player, herbGarden)
 
-    if (!result.ok) {
+      if (!result.ok) {
+        pushLog(result.message)
+        return false
+      }
+
+      setPlayer(result.player)
+      setHerbGarden(result.herbGarden)
       pushLog(result.message)
-      return false
+      return true
     }
 
-    setPlayer(result.player)
-    setHerbGarden(result.herbGarden)
-    pushLog(result.message)
-    return true
+    try {
+      const result = await harvestAllHerbsAction()
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong co o nao san sang thu hoach.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Harvest all herbs sync error:', error)
+      if (allowDevFallback) {
+        const result = harvestAllReadyHerbs(player, herbGarden)
+
+        if (!result.ok) {
+          pushLog(result.message)
+          return false
+        }
+
+        setPlayer(result.player)
+        setHerbGarden(result.herbGarden)
+        pushLog(`${result.message} [dev local]`)
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu linh dien.')
+      return false
+    }
+  }
+
+  function resetDungeon() {
+    setCurrentDungeonFloor(null)
+    setCurrentEnemy(null)
+    setKillCount(0)
+  }
+
+  const dungeonState = {
+    activeTab,
+    setActiveTab,
+    currentDungeonFloor,
+    setCurrentDungeonFloor,
+    currentEnemy,
+    setCurrentEnemy,
+    killCount,
+    setKillCount,
+    dungeonCooldownUntil,
+    setDungeonCooldownUntil,
+    cooldownText,
+    resetDungeon,
   }
 
   const { actions: dungeonActions } = useDungeonCombat({
     player,
     setPlayer,
+    user,
     finalStats,
     pushLog,
     pushCombatLog,
     clearCombatLog,
+    replaceCombatLog,
+    applyServerActionResult,
     dungeonState,
   })
 
   return {
-    loading,
+    loading: false,
     player,
     herbGarden,
     crafting,
@@ -477,25 +774,30 @@ export function usePlayer(user) {
     message,
     logs,
     combatLogs,
-    activeTab: dungeonState.activeTab,
+    activeTab,
     breakthroughCost,
     finalStats,
     needsInitialNaming,
+    actionState: {
+      pendingAction,
+      isCultivating,
+      isBreakingThrough,
+      isActionLocked,
+    },
 
     dungeon: {
-      currentFloor: dungeonState.currentDungeonFloor,
-      currentEnemy: dungeonState.currentEnemy,
-      killCount: dungeonState.killCount,
-      cooldownUntil: dungeonState.dungeonCooldownUntil,
-      cooldownText: dungeonState.cooldownText,
+      currentFloor: currentDungeonFloor,
+      currentEnemy,
+      killCount,
+      cooldownUntil: dungeonCooldownUntil,
+      cooldownText,
     },
 
     actions: {
-      setActiveTab: dungeonState.setActiveTab,
+      setActiveTab,
       cultivate: handleCultivate,
       breakthrough: handleBreakthrough,
       setInitialName: handleSetInitialName,
-      rename: handleRename,
       equipItem: handleEquipItem,
       unequipItem: handleUnequipItem,
       useItem: handleUseItem,
