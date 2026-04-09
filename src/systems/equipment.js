@@ -1,4 +1,4 @@
-import { equipmentDefs } from '../data/equipments';
+import { equipmentDefs } from '../data/equipments'
 
 export function createEquipmentInstance(defId, overrides = {}) {
   return {
@@ -8,55 +8,58 @@ export function createEquipmentInstance(defId, overrides = {}) {
     equipped: false,
     bonusStats: {},
     ...overrides,
-  };
+  }
 }
 
 export function getEquipmentDef(defId) {
-  return equipmentDefs[defId] || null;
+  return equipmentDefs[defId] || null
 }
 
 export function getInventoryItemById(inventory, instanceId) {
-  return inventory.find((item) => item.instanceId === instanceId) || null;
+  return inventory.find((item) => item.instanceId === instanceId) || null
 }
 
 export function canEquipItem(player, inventoryItem) {
-  const def = getEquipmentDef(inventoryItem.defId);
+  const def = getEquipmentDef(inventoryItem.defId)
 
   if (!def) {
-    return { ok: false, message: 'Không tìm thấy dữ liệu trang bị.' };
+    return { ok: false, message: 'Không tìm thấy dữ liệu trang bị.' }
   }
 
   if ((player.stage || 1) < (def.levelRequired || 1)) {
-    return { ok: false, message: `Cần cảnh giới/tầng tối thiểu ${def.levelRequired}.` };
+    return {
+      ok: false,
+      message: `Cần cảnh giới/tầng tối thiểu ${def.levelRequired}.`,
+    }
   }
 
-  return { ok: true };
+  return { ok: true }
 }
 
 export function equipItem(player, instanceId) {
-  const inventoryItem = getInventoryItemById(player.inventory || [], instanceId);
+  const inventoryItem = getInventoryItemById(player.inventory || [], instanceId)
   if (!inventoryItem) {
-    return { ok: false, message: 'Không tìm thấy vật phẩm trong túi đồ.' };
+    return { ok: false, message: 'Không tìm thấy vật phẩm trong túi đồ.' }
   }
 
-  const check = canEquipItem(player, inventoryItem);
-  if (!check.ok) return check;
+  const check = canEquipItem(player, inventoryItem)
+  if (!check.ok) return check
 
-  const def = getEquipmentDef(inventoryItem.defId);
-  const slot = def.slot;
-  const oldInstanceId = player.equipment?.[slot] || null;
+  const def = getEquipmentDef(inventoryItem.defId)
+  const slot = def.slot
+  const oldInstanceId = player.equipment?.[slot] || null
 
   const nextInventory = (player.inventory || []).map((item) => {
     if (item.instanceId === instanceId) {
-      return { ...item, equipped: true };
+      return { ...item, equipped: true }
     }
 
     if (item.instanceId === oldInstanceId) {
-      return { ...item, equipped: false };
+      return { ...item, equipped: false }
     }
 
-    return item;
-  });
+    return item
+  })
 
   return {
     ok: true,
@@ -69,20 +72,20 @@ export function equipItem(player, instanceId) {
       },
       inventory: nextInventory,
     },
-  };
+  }
 }
 
 export function unequipItem(player, slot) {
-  const instanceId = player.equipment?.[slot];
+  const instanceId = player.equipment?.[slot]
   if (!instanceId) {
-    return { ok: false, message: 'Ô trang bị đang trống.' };
+    return { ok: false, message: 'Ô trang bị đang trống.' }
   }
 
   const nextInventory = (player.inventory || []).map((item) =>
     item.instanceId === instanceId
       ? { ...item, equipped: false }
       : item
-  );
+  )
 
   return {
     ok: true,
@@ -95,5 +98,5 @@ export function unequipItem(player, slot) {
       },
       inventory: nextInventory,
     },
-  };
+  }
 }

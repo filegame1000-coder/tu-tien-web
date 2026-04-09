@@ -6,18 +6,18 @@ import {
   createDefaultPlayer,
   MAX_OFFLINE_SECONDS,
   OFFLINE_EXP_PER_SECOND,
-  tryBreakthrough
+  tryBreakthrough,
 } from '../systems/cultivation'
 import {
   generateBoss,
   generateMonster,
-  getMonsterDrops
+  getMonsterDrops,
 } from '../systems/monsters'
 import { attackMonster, attackPlayer } from '../systems/combat'
 import { equipItem, getEquippedBonuses } from '../systems/equipment'
 
 export function useGameState({ user, authReady }) {
-  // ✅ FIX QUAN TRỌNG: phải gọi function
+  // FIX QUAN TRỌNG: phải gọi function
   const [player, setPlayer] = useState(createDefaultPlayer())
   const [log, setLog] = useState('Bắt đầu con đường tu luyện...')
   const [autoTraining, setAutoTraining] = useState(false)
@@ -37,7 +37,7 @@ export function useGameState({ user, authReady }) {
     return () => window.removeEventListener('resize', syncScreen)
   }, [])
 
-  // ✅ Guard an toàn
+  // Guard an toàn
   const equippedBonuses = useMemo(
     () => (player ? getEquippedBonuses(player) : { damage: 0, defense: 0, maxHp: 0 }),
     [player]
@@ -109,7 +109,7 @@ export function useGameState({ user, authReady }) {
       ...player,
       damage: finalDamage,
       defense: finalDefense,
-      maxHp: finalMaxHp
+      maxHp: finalMaxHp,
     }
 
     const playerTurn = attackMonster(combatPlayer, currentMonster)
@@ -132,7 +132,7 @@ export function useGameState({ user, authReady }) {
 
     setCurrentMonster(playerTurn.monster)
     setPlayer((prev) => ({ ...prev, hp: monsterTurn.player.hp }))
-    setLog(`Combat diễn ra...`)
+    setLog('Combat diễn ra...')
     setCombatBusy(false)
   }
 
@@ -143,7 +143,7 @@ export function useGameState({ user, authReady }) {
     setLog('Reset thành công.')
   }
 
-  // ✅ Guard cực quan trọng
+  // Guard cực quan trọng
   useEffect(() => {
     if (!authReady || !user) return
 
@@ -167,7 +167,7 @@ export function useGameState({ user, authReady }) {
       autoTraining,
       currentMonster,
       log,
-      lastSeenAt: Date.now()
+      lastSeenAt: Date.now(),
     }
 
     saveGame(data)
@@ -182,7 +182,7 @@ export function useGameState({ user, authReady }) {
       currentMonster,
       offlineReward,
       activeTab,
-      isMobile
+      isMobile,
     },
     derived: {
       finalDamage,
@@ -191,7 +191,9 @@ export function useGameState({ user, authReady }) {
       finalHp,
       lifeRegenText,
       AUTO_EXP_PER_SECOND,
-MAX_OFFLINE_SECONDS
+      MAX_OFFLINE_SECONDS,
+      OFFLINE_EXP_PER_SECOND,
+      getMonsterDrops,
     },
     actions: {
       setActiveTab,
@@ -202,7 +204,7 @@ MAX_OFFLINE_SECONDS
       spawnMonster: handleSpawnMonster,
       spawnBoss: handleSpawnBoss,
       attackMonster: handleAttackMonster,
-      resetSave: handleResetSave
-    }
+      resetSave: handleResetSave,
+    },
   }
 }

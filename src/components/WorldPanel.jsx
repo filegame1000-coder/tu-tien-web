@@ -1,19 +1,19 @@
 import { useMemo, useState } from 'react'
 
 function formatLastSeen(lastSeenAtMs) {
-  if (!lastSeenAtMs) return 'Chua hoat dong'
+  if (!lastSeenAtMs) return 'Chưa hoạt động'
 
   const diffMs = Date.now() - lastSeenAtMs
   const diffMinutes = Math.max(0, Math.floor(diffMs / 60000))
 
-  if (diffMinutes < 1) return 'Vua xong'
-  if (diffMinutes < 60) return `${diffMinutes} phut truoc`
+  if (diffMinutes < 1) return 'Vừa xong'
+  if (diffMinutes < 60) return `${diffMinutes} phút trước`
 
   const diffHours = Math.floor(diffMinutes / 60)
-  if (diffHours < 24) return `${diffHours} gio truoc`
+  if (diffHours < 24) return `${diffHours} giờ trước`
 
   const diffDays = Math.floor(diffHours / 24)
-  return `${diffDays} ngay truoc`
+  return `${diffDays} ngày trước`
 }
 
 function PlayerRow({ player, selected, onSelect }) {
@@ -27,10 +27,10 @@ function PlayerRow({ player, selected, onSelect }) {
       <div className="inventory-card-top">
         <div>
           <div className="inventory-name">
-            #{player.rank} {player.name} {player.isSelf ? '(Ban)' : ''}
+            #{player.rank} {player.name} {player.isSelf ? '(Bạn)' : ''}
           </div>
           <div className="inventory-sub">
-            {player.realm} • Tang {player.stage}
+            {player.realm} • Tầng {player.stage}
           </div>
         </div>
 
@@ -40,9 +40,9 @@ function PlayerRow({ player, selected, onSelect }) {
       </div>
 
       <div className="inventory-stat-list">
-        <span className="inventory-stat-chip">Luc chien: {player.power}</span>
-        <span className="inventory-stat-chip">Cong: {player.damage}</span>
-        <span className="inventory-stat-chip">Thu: {player.defense}</span>
+        <span className="inventory-stat-chip">Lực chiến: {player.power}</span>
+        <span className="inventory-stat-chip">Công: {player.damage}</span>
+        <span className="inventory-stat-chip">Thủ: {player.defense}</span>
       </div>
     </button>
   )
@@ -65,29 +65,29 @@ export default function WorldPanel({ players = [], loading = false }) {
       <div className="altar-frame">
         <div className="altar-header">
           <div>
-            <div className="section-kicker">The gioi tu tien</div>
+            <div className="section-kicker">Thế giới tu tiên</div>
             <h2 className="realm-title" style={{ fontSize: 32 }}>
-              THIEN HA
+              THIÊN HẠ
             </h2>
           </div>
 
           <div className="realm-stage-pill">
-            <span>Nhan vat hien thi</span>
+            <span>Nhân vật hiển thị</span>
             <strong>{players.length}</strong>
           </div>
         </div>
 
         {loading ? (
           <div className="mini-panel">
-            <div className="mini-panel-title">Dang tai thien ha...</div>
+            <div className="mini-panel-title">Đang tải thiên hạ...</div>
           </div>
         ) : null}
 
         {!loading && players.length === 0 ? (
           <div className="mini-panel">
-            <div className="mini-panel-title">Chua co dao huu nao</div>
+            <div className="mini-panel-title">Chưa có đạo hữu nào</div>
             <p style={{ margin: 0, color: '#b8bfd6' }}>
-              Khi nguoi choi co hanh dong online, ho so cong khai se xuat hien tai day.
+              Khi người chơi có hành động online, hồ sơ công khai sẽ xuất hiện tại đây.
             </p>
           </div>
         ) : null}
@@ -106,23 +106,23 @@ export default function WorldPanel({ players = [], loading = false }) {
             </div>
 
             <div className="mini-panel">
-              <div className="mini-panel-title">Ho so dao huu</div>
+              <div className="mini-panel-title">Hồ sơ đạo hữu</div>
 
               {selectedPlayer ? (
                 <>
                   <div className="requirements-list">
                     <div>
-                      <span>Dao hieu</span>
+                      <span>Đạo hiệu</span>
                       <strong>{selectedPlayer.name}</strong>
                     </div>
                     <div>
-                      <span>Canh gioi</span>
+                      <span>Cảnh giới</span>
                       <strong>
-                        {selectedPlayer.realm} • Tang {selectedPlayer.stage}
+                        {selectedPlayer.realm} • Tầng {selectedPlayer.stage}
                       </strong>
                     </div>
                     <div>
-                      <span>Luc chien</span>
+                      <span>Lực chiến</span>
                       <strong>{selectedPlayer.power}</strong>
                     </div>
                     <div>
@@ -136,24 +136,24 @@ export default function WorldPanel({ players = [], loading = false }) {
                       </strong>
                     </div>
                     <div>
-                      <span>Cong / Thu</span>
+                      <span>Công / Thủ</span>
                       <strong>
                         {selectedPlayer.damage} / {selectedPlayer.defense}
                       </strong>
                     </div>
                     <div>
-                      <span>Linh thach</span>
+                      <span>Linh thạch</span>
                       <strong>{selectedPlayer.spiritStones}</strong>
                     </div>
                     <div>
-                      <span>Duoc thao</span>
+                      <span>Dược thảo</span>
                       <strong>{selectedPlayer.herbs}</strong>
                     </div>
                     <div>
-                      <span>Trang thai</span>
+                      <span>Trạng thái</span>
                       <strong>
                         {selectedPlayer.isOnline
-                          ? 'Dang online'
+                          ? 'Đang online'
                           : formatLastSeen(selectedPlayer.lastSeenAtMs)}
                       </strong>
                     </div>

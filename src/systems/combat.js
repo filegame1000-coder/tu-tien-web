@@ -36,6 +36,30 @@ function calculateDamage(attacker, defender) {
   return Math.max(1, rawDamage)
 }
 
+export function resolveSkillAttack(attackerInput, defenderInput, multiplier = 1) {
+  const attacker = normalizeEntity(attackerInput)
+  const defender = normalizeEntity(defenderInput)
+
+  if (attacker.hp <= 0 || defender.hp <= 0) {
+    return resolveAttack(attacker, defender)
+  }
+
+  const baseDamage = calculateDamage(attacker, defender)
+  const damage = Math.max(1, Math.round(baseDamage * Math.max(1, Number(multiplier) || 1)))
+  const defenderNextHp = Math.max(0, defender.hp - damage)
+
+  return {
+    damage,
+    attackerNext: { ...attacker },
+    defenderNext: {
+      ...defender,
+      hp: defenderNextHp,
+    },
+    isDefenderDead: defenderNextHp <= 0,
+    log: `${attacker.name} tung ky nang gay ${damage} sat thuong len ${defender.name}.`,
+  }
+}
+
 export function resolveAttack(attackerInput, defenderInput) {
   const attacker = normalizeEntity(attackerInput)
   const defender = normalizeEntity(defenderInput)

@@ -7,7 +7,7 @@ export default function AuthScreen({ onConfirm, message, email, onLogout }) {
     <div className="dao-auth-screen">
       <div className="dao-auth-card">
         <div className="section-kicker">Khai mở tiên lộ</div>
-        <h1 className="dao-auth-title">THIÊN ĐẠO CÁC</h1>
+        <h1 className="dao-auth-title">HUYỀN THIÊN ĐẠI LỤC</h1>
         <p className="dao-auth-subtitle">
           Tài khoản hiện tại: <strong>{email || 'Ẩn danh'}</strong>
         </p>

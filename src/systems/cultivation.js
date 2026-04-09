@@ -4,12 +4,14 @@ export const REALM_QI = 'Luyện Khí'
 const REALM_ALIASES = {
   'Phàm Nhân': REALM_MORTAL,
   'PhÃ m NhÃ¢n': REALM_MORTAL,
+  'PhÃƒÂ m NhÃƒÂ¢n': REALM_MORTAL,
   'pham nhan': REALM_MORTAL,
-  'phàm nhân': REALM_MORTAL,
+  'phÃ m nhÃ¢n': REALM_MORTAL,
   'Luyện Khí': REALM_QI,
   'Luyá»‡n KhÃ­': REALM_QI,
+  'LuyÃ¡Â»â€¡n KhÃƒÂ­': REALM_QI,
   'luyen khi': REALM_QI,
-  'luyện khí': REALM_QI,
+  'luyá»‡n khÃ­': REALM_QI,
 }
 
 export const REALMS = [

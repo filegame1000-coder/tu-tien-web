@@ -1,11 +1,12 @@
 import { REALM_MORTAL } from './cultivation'
 import { createEquipmentInstance } from './equipment'
+import { normalizePlayerSkills } from './skills'
 
 export const DEFAULT_PLAYER_NAME = 'Vô Danh'
 export const RENAME_COST = 1000
 
 export function createPlayer() {
-  return {
+  return normalizePlayerSkills({
     id: 'player_001',
     name: '',
     realm: REALM_MORTAL,
@@ -56,7 +57,7 @@ export function createPlayer() {
       { id: 'hp_potion_small', quantity: 3 },
       { id: 'mp_potion_small', quantity: 2 },
     ],
-  }
+  })
 }
 
 export function createDefaultPlayer() {
@@ -69,6 +70,14 @@ export function normalizePlayerName(name) {
 
 export function setInitialPlayerName(player, newName) {
   const normalizedName = normalizePlayerName(newName)
+  const currentName = normalizePlayerName(player?.name || '')
+
+  if (currentName) {
+    return {
+      ok: false,
+      message: 'Tài khoản này đã có nhân vật rồi.',
+    }
+  }
 
   if (!normalizedName) {
     return {

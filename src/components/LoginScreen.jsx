@@ -16,7 +16,7 @@ export default function LoginScreen({
     <div className="dao-auth-screen">
       <div className="dao-auth-card">
         <div className="section-kicker">Tiên môn nhập thế</div>
-        <h1 className="dao-auth-title">THIÊN ĐẠO CÁC</h1>
+        <h1 className="dao-auth-title">HUYỀN THIÊN ĐẠI LỤC</h1>
         <p className="dao-auth-subtitle">
           Đăng nhập để đồng bộ nhân vật của bạn giữa nhiều thiết bị.
         </p>

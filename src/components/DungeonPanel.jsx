@@ -1,4 +1,5 @@
 import LogPanel from './LogPanel'
+import { getEquippedSkillEntries } from '../systems/skills'
 
 function Bar({ value, max, label }) {
   const safeValue = Number(value) || 0
@@ -28,7 +29,8 @@ export default function DungeonPanel({
   combatLogs = [],
 }) {
   const enemy = dungeon?.currentEnemy
-  const playerHp = player?.hp ?? 0
+  const playerHp = Number(player?.hp) || 0
+  const equippedSkills = getEquippedSkillEntries(player)
 
   return (
     <section className="altar-card dungeon-card">
@@ -89,7 +91,7 @@ export default function DungeonPanel({
             <div className="action-row centered">
               <button
                 className="dao-btn dao-btn-danger"
-                onClick={actions.attackEnemy}
+                onClick={() => actions.attackEnemy()}
                 disabled={!enemy || playerHp <= 0}
               >
                 Tấn công
@@ -97,6 +99,64 @@ export default function DungeonPanel({
               <button className="dao-btn dao-btn-muted" onClick={actions.leaveDungeon}>
                 Rời bí cảnh
               </button>
+            </div>
+
+            <div className="mini-panel" style={{ marginTop: 18 }}>
+              <div className="mini-panel-title">Kỹ năng chiến đấu</div>
+              <div className="inventory-grid">
+                {equippedSkills.map((entry) => {
+                  const disabled =
+                    !entry.skillId ||
+                    !enemy ||
+                    playerHp <= 0 ||
+                    entry.cooldown > 0 ||
+                    (Number(player?.mp) || 0) < (Number(entry.def?.manaCost) || 0)
+
+                  return (
+                    <div key={`skill-slot-${entry.slotIndex}`} className="inventory-card">
+                      <div className="inventory-card-top">
+                        <div>
+                          <div className="inventory-name">Ô {entry.slotIndex + 1}</div>
+                          <div className="inventory-sub">
+                            {entry.def ? entry.def.name : 'Chưa trang bị kỹ năng'}
+                          </div>
+                        </div>
+
+                        {entry.def ? (
+                          <div className="inventory-qty">
+                            {entry.cooldown > 0 ? `CD ${entry.cooldown}` : 'Sẵn sàng'}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {entry.def ? (
+                        <>
+                          <p className="inventory-description">{entry.def.description}</p>
+                          <div className="inventory-stat-list">
+                            <span className="inventory-stat-chip">Hao Ki: {entry.def.manaCost}</span>
+                            <span className="inventory-stat-chip">
+                              Hồi chiêu: {entry.def.cooldownTurns} lượt
+                            </span>
+                          </div>
+                          <button
+                            className="dao-btn dao-btn-accent"
+                            onClick={() => actions.attackEnemy(entry.skillId)}
+                            disabled={disabled}
+                          >
+                            {entry.cooldown > 0
+                              ? `Còn hồi ${entry.cooldown} lượt`
+                              : `Dùng ${entry.def.name}`}
+                          </button>
+                        </>
+                      ) : (
+                        <p className="inventory-description">
+                          Hãy vào Động phủ để trang bị kỹ năng vào ô này.
+                        </p>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             </div>
 
             <div className="mini-panel" style={{ marginTop: 24 }}>

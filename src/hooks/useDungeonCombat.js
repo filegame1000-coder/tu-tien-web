@@ -6,8 +6,15 @@ import {
 import {
   buildCombatEntityFromEnemy,
   buildCombatEntityFromPlayer,
+  resolveAttack,
   resolveCombatRound,
+  resolveSkillAttack,
 } from '../systems/combat'
+import {
+  advanceSkillCooldowns,
+  consumeSkillForTurn,
+  getSkillDef,
+} from '../systems/skills'
 import {
   attackDungeonEnemyAction,
   enterDungeonAction,
@@ -68,15 +75,15 @@ export function useDungeonCombat({
     if (floor === 1) {
       const enemy = createRandomFloor1Monster()
       setCurrentEnemy(enemy)
-      pushLog('Ban tien vao Bi Canh tang 1. [dev local]')
-      pushCombatLog('Ban tien vao Bi Canh tang 1.')
-      pushCombatLog(`Gap ${enemy.name}.`)
+      pushLog('Bạn tiến vào Bí Cảnh tầng 1. [dev local]')
+      pushCombatLog('Bạn tiến vào Bí Cảnh tầng 1.')
+      pushCombatLog(`Gặp ${enemy.name}.`)
     } else {
       const enemy = createBoss(2)
       setCurrentEnemy(enemy)
-      pushLog('Ban tien vao Bi Canh tang 2. [dev local]')
-      pushCombatLog('Ban tien vao Bi Canh tang 2.')
-      pushCombatLog(`Gap ${enemy.name}.`)
+      pushLog('Bạn tiến vào Bí Cảnh tầng 2. [dev local]')
+      pushCombatLog('Bạn tiến vào Bí Cảnh tầng 2.')
+      pushCombatLog(`Gặp ${enemy.name}.`)
     }
 
     setActiveTab('dungeon')
@@ -85,28 +92,99 @@ export function useDungeonCombat({
 
   function leaveDungeonLocal() {
     exitDungeonLocal()
-    pushLog('Ban roi khoi bi canh. [dev local]')
-    pushCombatLog('Ban roi khoi bi canh.')
+    pushLog('Bạn rời khỏi bí cảnh. [dev local]')
+    pushCombatLog('Bạn rời khỏi bí cảnh.')
     return true
   }
 
-  function attackEnemyLocal() {
+  function attackEnemyLocal(skillId = null) {
     if (!currentEnemy || !currentDungeonFloor) {
-      pushLog('Hien khong co muc tieu trong bi canh.')
-      pushCombatLog('Khong co muc tieu de tan cong.')
+      pushLog('Hiện không có mục tiêu trong bí cảnh.')
+      pushCombatLog('Không có mục tiêu để tấn công.')
       return false
     }
 
     if ((player.hp ?? 0) <= 0) {
       exitDungeonLocal()
-      pushLog('Ban da trong thuong, bi day ra khoi bi canh. [dev local]')
-      pushCombatLog('Ban da trong thuong va bi day ra khoi bi canh.')
+      pushLog('Bạn đã trọng thương, bị đẩy ra khỏi bí cảnh. [dev local]')
+      pushCombatLog('Bạn đã trọng thương và bị đẩy ra khỏi bí cảnh.')
       return false
     }
 
-    const playerEntity = buildCombatEntityFromPlayer(player, finalStats)
+    const nextTurnPlayer = advanceSkillCooldowns(player)
+    const playerEntity = buildCombatEntityFromPlayer(nextTurnPlayer, finalStats)
     const enemyEntity = buildCombatEntityFromEnemy(currentEnemy)
-    const result = resolveCombatRound(playerEntity, enemyEntity)
+    let result
+    let playerAfterTurn = nextTurnPlayer
+
+    if (skillId) {
+      const skillUse = consumeSkillForTurn(nextTurnPlayer, skillId)
+
+      if (!skillUse.ok) {
+        pushLog(skillUse.message)
+        pushCombatLog(skillUse.message)
+        return false
+      }
+
+      const skillDef = skillUse.def
+      playerAfterTurn = skillUse.player
+      const skillPlayerEntity = buildCombatEntityFromPlayer(playerAfterTurn, finalStats)
+      const playerAttack = resolveSkillAttack(
+        skillPlayerEntity,
+        enemyEntity,
+        skillDef.damageMultiplier
+      )
+      const skillLogs = [
+        `${player.name || 'Bạn'} thi triển ${skillDef.name}, tiêu hao ${skillDef.manaCost} Ki, còn lại ${playerAfterTurn.mp} Ki và cường hóa 220% sát thương.`,
+        playerAttack.log,
+      ]
+
+      if (playerAttack.isDefenderDead) {
+        result = {
+          playerAttack,
+          enemyAttack: null,
+          nextPlayer: {
+            ...playerAfterTurn,
+            hp: playerAttack.attackerNext.hp,
+            mp: playerAfterTurn.mp,
+          },
+          nextEnemy: {
+            ...currentEnemy,
+            hp: playerAttack.defenderNext.hp,
+            maxHp: playerAttack.defenderNext.maxHp ?? currentEnemy.maxHp,
+          },
+          isPlayerDead: false,
+          isEnemyDead: true,
+          logs: skillLogs,
+        }
+      } else {
+        const enemyAttack = resolveAttack(playerAttack.defenderNext, {
+          ...skillPlayerEntity,
+          hp: playerAfterTurn.hp,
+          mp: playerAfterTurn.mp,
+        })
+        result = {
+          playerAttack,
+          enemyAttack,
+          nextPlayer: {
+            ...playerAfterTurn,
+            hp: enemyAttack.defenderNext.hp,
+            mp: playerAfterTurn.mp,
+          },
+          nextEnemy: {
+            ...currentEnemy,
+            hp: enemyAttack.attackerNext.hp,
+            maxHp: enemyAttack.attackerNext.maxHp ?? currentEnemy.maxHp,
+          },
+          isPlayerDead: enemyAttack.defenderNext.hp <= 0,
+          isEnemyDead: false,
+          logs: [...skillLogs, enemyAttack.log],
+        }
+      }
+    } else {
+      result = resolveCombatRound(playerEntity, enemyEntity)
+      playerAfterTurn = nextTurnPlayer
+    }
 
     result.logs.forEach((text) => {
       pushCombatLog(text)
@@ -115,7 +193,7 @@ export function useDungeonCombat({
     if (result.isEnemyDead) {
       if (currentEnemy.type === 'monster') {
         setPlayer((prev) => ({
-          ...prev,
+          ...playerAfterTurn,
           hp: result.nextPlayer.hp,
           exp: (prev.exp ?? 0) + 10,
           spiritStones: (prev.spiritStones ?? 0) + 1,
@@ -123,9 +201,9 @@ export function useDungeonCombat({
 
         const nextKillCount = killCount + 1
         setKillCount(nextKillCount)
-        pushLog(`Ban danh bai ${currentEnemy.name}, nhan 10 EXP va 1 linh thach. [dev local]`)
-        pushCombatLog(`Ban danh bai ${currentEnemy.name}.`)
-        pushCombatLog('Nhan 10 EXP va 1 linh thach.')
+        pushLog(`Bạn đánh bại ${currentEnemy.name}, nhận 10 EXP và 1 linh thạch. [dev local]`)
+        pushCombatLog(`Bạn đánh bại ${currentEnemy.name}.`)
+        pushCombatLog('Nhận 10 EXP và 1 linh thạch.')
 
         const nextEnemy =
           currentDungeonFloor === 1
@@ -133,14 +211,14 @@ export function useDungeonCombat({
             : createBoss(2)
 
         setCurrentEnemy(nextEnemy)
-        pushCombatLog(`Ke dich tiep theo xuat hien: ${nextEnemy.name}.`)
+        pushCombatLog(`Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`)
         return true
       }
 
       const drop = getBossDrop(currentDungeonFloor)
 
       setPlayer((prev) => ({
-        ...prev,
+        ...playerAfterTurn,
         hp: result.nextPlayer.hp,
         exp: (prev.exp ?? 0) + (currentEnemy.rewardExp ?? 0),
         spiritStones: (prev.spiritStones ?? 0) + (drop.spiritStones ?? 0),
@@ -148,30 +226,30 @@ export function useDungeonCombat({
       }))
 
       pushLog(
-        `Ban danh bai ${currentEnemy.name}, nhan ${currentEnemy.rewardExp ?? 0} EXP. ${drop.message} [dev local]`
+        `Bạn đánh bại ${currentEnemy.name}, nhận ${currentEnemy.rewardExp ?? 0} EXP. ${drop.message} [dev local]`
       )
-      pushCombatLog(`Ban danh bai ${currentEnemy.name}.`)
+      pushCombatLog(`Bạn đánh bại ${currentEnemy.name}.`)
       pushCombatLog(
-        `Nhan ${currentEnemy.rewardExp ?? 0} EXP, +${drop.spiritStones ?? 0} linh thach, +${drop.herbs ?? 0} duoc thao.`
+        `Nhận ${currentEnemy.rewardExp ?? 0} EXP, +${drop.spiritStones ?? 0} linh thạch, +${drop.herbs ?? 0} dược thảo.`
       )
 
       const nextEnemy =
         currentDungeonFloor === 1 ? createRandomFloor1Monster() : createBoss(2)
 
       setCurrentEnemy(nextEnemy)
-      pushCombatLog(`Ke dich tiep theo xuat hien: ${nextEnemy.name}.`)
+      pushCombatLog(`Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`)
       return true
     }
 
     if (result.isPlayerDead) {
-      setPlayer((prev) => ({
-        ...prev,
+      setPlayer(() => ({
+        ...playerAfterTurn,
         hp: 0,
       }))
 
       exitDungeonLocal()
-      pushLog('Ban bi danh bai va bi day ra khoi bi canh. [dev local]')
-      pushCombatLog('Ban da bi danh bai va bi day ra khoi bi canh.')
+      pushLog('Bạn bị đánh bại và bị đẩy ra khỏi bí cảnh. [dev local]')
+      pushCombatLog('Bạn đã bị đánh bại và bị đẩy ra khỏi bí cảnh.')
       return false
     }
 
@@ -182,8 +260,8 @@ export function useDungeonCombat({
       shield: result.nextEnemy.shield ?? 0,
     }))
 
-    setPlayer((prev) => ({
-      ...prev,
+    setPlayer(() => ({
+      ...playerAfterTurn,
       hp: result.nextPlayer.hp,
     }))
 
@@ -212,7 +290,7 @@ export function useDungeonCombat({
       if (allowDevFallback) {
         return enterDungeonLocal(floor)
       }
-      pushLog('Khong ket noi duoc may chu bi canh.')
+      pushLog('Không kết nối được máy chủ bí cảnh.')
       return false
     }
   }
@@ -236,28 +314,28 @@ export function useDungeonCombat({
       if (allowDevFallback) {
         return leaveDungeonLocal()
       }
-      pushLog('Khong ket noi duoc may chu bi canh.')
+      pushLog('Không kết nối được máy chủ bí cảnh.')
       return false
     }
   }
 
-  async function handleAttackEnemy() {
+  async function handleAttackEnemy(skillId = null) {
     if (!currentEnemy || !currentDungeonFloor) {
-      pushLog('Hien khong co muc tieu trong bi canh.')
+      pushLog('Hiện không có mục tiêu trong bí cảnh.')
       return false
     }
 
     if (!user) {
-      return attackEnemyLocal()
+      return attackEnemyLocal(skillId)
     }
 
     if ((player.hp ?? 0) <= 0) {
-      pushLog('Ban da trong thuong, khong the tiep tuc chien dau.')
+      pushLog('Bạn đã trọng thương, không thể tiếp tục chiến đấu.')
       return false
     }
 
     try {
-      const result = await attackDungeonEnemyAction()
+      const result = await attackDungeonEnemyAction(skillId)
       applyDungeonResult(result)
 
       if (!result?.ok) {
@@ -268,9 +346,14 @@ export function useDungeonCombat({
     } catch (error) {
       console.error('Attack dungeon sync error:', error)
       if (allowDevFallback) {
-        return attackEnemyLocal()
+        return attackEnemyLocal(skillId)
       }
-      pushLog('Khong ket noi duoc may chu chien dau.')
+      const skillDef = skillId ? getSkillDef(skillId) : null
+      pushLog(
+        skillDef
+          ? `Không kết nối được máy chủ khi thi triển ${skillDef.name}.`
+          : 'Không kết nối được máy chủ chiến đấu.'
+      )
       return false
     }
   }

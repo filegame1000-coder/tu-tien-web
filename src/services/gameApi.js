@@ -78,6 +78,28 @@ export async function unequipItemAction(slot) {
   }
 }
 
+export async function equipCombatSkillAction(skillId, slotIndex) {
+  try {
+    const fn = httpsCallable(functions, 'equipCombatSkillAction')
+    const res = await fn({ skillId, slotIndex })
+    return res.data
+  } catch (error) {
+    console.error('equipCombatSkillAction error:', error)
+    throw error
+  }
+}
+
+export async function unequipCombatSkillAction(slotIndex) {
+  try {
+    const fn = httpsCallable(functions, 'unequipCombatSkillAction')
+    const res = await fn({ slotIndex })
+    return res.data
+  } catch (error) {
+    console.error('unequipCombatSkillAction error:', error)
+    throw error
+  }
+}
+
 export async function enterDungeonAction(floor) {
   try {
     const fn = httpsCallable(functions, 'enterDungeonAction')
@@ -100,10 +122,10 @@ export async function leaveDungeonAction() {
   }
 }
 
-export async function attackDungeonEnemyAction() {
+export async function attackDungeonEnemyAction(skillId = null) {
   try {
     const fn = httpsCallable(functions, 'attackDungeonEnemyAction')
-    const res = await fn({})
+    const res = await fn({ skillId })
     return res.data
   } catch (error) {
     console.error('attackDungeonEnemyAction error:', error)

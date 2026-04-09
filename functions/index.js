@@ -67,7 +67,7 @@ function normalizeRealm(realm) {
 }
 
 function createDefaultPlayer() {
-  return {
+  return normalizePlayerSkills({
     id: 'player_001',
     name: '',
     realm: REALM_MORTAL,
@@ -122,7 +122,7 @@ function createDefaultPlayer() {
       { id: 'hp_potion_small', quantity: 3 },
       { id: 'mp_potion_small', quantity: 2 },
     ],
-  }
+  })
 }
 
 function createDefaultHerbGarden() {
@@ -213,12 +213,194 @@ const CONSUMABLE_DEFS = {
   },
 }
 
+const MAX_EQUIPPED_SKILLS = 4
+const SKILL_DEFS = {
+  tram_kiem_quyet: {
+    id: 'tram_kiem_quyet',
+    name: 'Tram Kiem Quyet',
+    manaCost: 50,
+    cooldownTurns: 1,
+    damageMultiplier: 2.2,
+  },
+}
+
+function sanitizeSkillId(skillId) {
+  const normalized = String(skillId || '').trim()
+  return SKILL_DEFS[normalized] ? normalized : null
+}
+
+function normalizePlayerSkills(player) {
+  const rawLearned = Array.isArray(player?.learnedSkills)
+    ? player.learnedSkills
+    : ['tram_kiem_quyet']
+  const learnedSkills = Array.from(
+    new Set(
+      rawLearned
+        .map(sanitizeSkillId)
+        .filter(Boolean)
+        .concat(['tram_kiem_quyet'])
+    )
+  )
+  const rawEquipped = Array.isArray(player?.equippedSkills)
+    ? player.equippedSkills
+    : ['tram_kiem_quyet', null, null, null]
+  const equippedSkills = Array.from({ length: MAX_EQUIPPED_SKILLS }, (_, index) => {
+    const skillId = sanitizeSkillId(rawEquipped[index])
+    if (!skillId) return null
+    return learnedSkills.includes(skillId) ? skillId : null
+  })
+
+  if (!equippedSkills.some(Boolean) && learnedSkills.length > 0) {
+    equippedSkills[0] = learnedSkills[0]
+  }
+
+  const rawCooldowns =
+    player?.skillCooldowns && typeof player.skillCooldowns === 'object'
+      ? player.skillCooldowns
+      : {}
+  const skillCooldowns = Object.fromEntries(
+    Object.entries(rawCooldowns)
+      .map(([skillId, turns]) => [sanitizeSkillId(skillId), Math.max(0, Number(turns) || 0)])
+      .filter(([skillId]) => Boolean(skillId))
+  )
+
+  return {
+    ...player,
+    learnedSkills,
+    equippedSkills,
+    skillCooldowns,
+  }
+}
+
+function equipCombatSkill(player, skillId, slotIndex) {
+  const normalized = normalizePlayerSkills(player)
+  const safeSkillId = sanitizeSkillId(skillId)
+  const safeSlotIndex = Number(slotIndex)
+
+  if (!safeSkillId) {
+    return { ok: false, message: 'Ky nang khong ton tai.' }
+  }
+
+  if (!Number.isInteger(safeSlotIndex) || safeSlotIndex < 0 || safeSlotIndex >= MAX_EQUIPPED_SKILLS) {
+    return { ok: false, message: 'O trang bi ky nang khong hop le.' }
+  }
+
+  if (!normalized.learnedSkills.includes(safeSkillId)) {
+    return { ok: false, message: 'Ban chua hoc ky nang nay.' }
+  }
+
+  return {
+    ok: true,
+    player: {
+      ...normalized,
+      equippedSkills: normalized.equippedSkills.map((equippedSkillId, index) => {
+        if (equippedSkillId === safeSkillId) return null
+        if (index === safeSlotIndex) return safeSkillId
+        return equippedSkillId
+      }),
+    },
+    message: `Da trang bi ${SKILL_DEFS[safeSkillId].name} vao o ${safeSlotIndex + 1}.`,
+  }
+}
+
+function unequipCombatSkill(player, slotIndex) {
+  const normalized = normalizePlayerSkills(player)
+  const safeSlotIndex = Number(slotIndex)
+
+  if (!Number.isInteger(safeSlotIndex) || safeSlotIndex < 0 || safeSlotIndex >= MAX_EQUIPPED_SKILLS) {
+    return { ok: false, message: 'O trang bi ky nang khong hop le.' }
+  }
+
+  const currentSkillId = normalized.equippedSkills[safeSlotIndex]
+  if (!currentSkillId) {
+    return { ok: false, message: 'O ky nang nay dang trong.' }
+  }
+
+  return {
+    ok: true,
+    player: {
+      ...normalized,
+      equippedSkills: normalized.equippedSkills.map((skillId, index) =>
+        index === safeSlotIndex ? null : skillId
+      ),
+    },
+    message: `Da thao ${SKILL_DEFS[currentSkillId].name} khoi o ${safeSlotIndex + 1}.`,
+  }
+}
+
+function advanceSkillCooldowns(player) {
+  const normalized = normalizePlayerSkills(player)
+  return {
+    ...normalized,
+    skillCooldowns: Object.fromEntries(
+      Object.entries(normalized.skillCooldowns).map(([skillId, turns]) => [
+        skillId,
+        Math.max(0, Number(turns) - 1),
+      ])
+    ),
+  }
+}
+
+function consumeCombatSkill(player, skillId) {
+  const normalized = normalizePlayerSkills(player)
+  const safeSkillId = sanitizeSkillId(skillId)
+  const def = safeSkillId ? SKILL_DEFS[safeSkillId] : null
+
+  if (!safeSkillId || !def) {
+    return { ok: false, message: 'Ky nang khong ton tai.' }
+  }
+
+  if (!normalized.equippedSkills.includes(safeSkillId)) {
+    return { ok: false, message: 'Ky nang chua duoc trang bi.' }
+  }
+
+  const cooldown = Math.max(0, Number(normalized.skillCooldowns?.[safeSkillId]) || 0)
+  if (cooldown > 0) {
+    return { ok: false, message: `${def.name} con hoi chieu ${cooldown} luot.` }
+  }
+
+  if ((Number(normalized.mp) || 0) < def.manaCost) {
+    return { ok: false, message: `Khong du ${def.manaCost} Ki de thi trien ${def.name}.` }
+  }
+
+  return {
+    ok: true,
+    def,
+    player: {
+      ...normalized,
+      mp: Math.max(0, (Number(normalized.mp) || 0) - def.manaCost),
+      skillCooldowns: {
+        ...normalized.skillCooldowns,
+        [safeSkillId]: Number(def.cooldownTurns) + 1,
+      },
+    },
+  }
+}
+
 function normalizePlayerName(name) {
   return String(name || '').trim().replace(/\s+/g, ' ')
 }
 
+function normalizePlayerNameKey(name) {
+  return normalizePlayerName(name)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
 function setInitialPlayerName(player, newName) {
   const normalizedName = normalizePlayerName(newName)
+  const currentName = normalizePlayerName(player?.name || '')
+
+  if (currentName) {
+    return {
+      ok: false,
+      message: 'Tai khoan nay da co nhan vat roi.',
+    }
+  }
 
   if (!normalizedName) {
     return {
@@ -1110,6 +1292,30 @@ function calculateDamage(attacker, defender) {
   return Math.max(1, rawDamage)
 }
 
+function resolveSkillAttack(attackerInput, defenderInput, multiplier = 1) {
+  const attacker = normalizeEntity(attackerInput)
+  const defender = normalizeEntity(defenderInput)
+
+  if (attacker.hp <= 0 || defender.hp <= 0) {
+    return resolveAttack(attacker, defender)
+  }
+
+  const baseDamage = calculateDamage(attacker, defender)
+  const damage = Math.max(1, Math.round(baseDamage * Math.max(1, Number(multiplier) || 1)))
+  const defenderNextHp = Math.max(0, defender.hp - damage)
+
+  return {
+    damage,
+    attackerNext: { ...attacker },
+    defenderNext: {
+      ...defender,
+      hp: defenderNextHp,
+    },
+    isDefenderDead: defenderNextHp <= 0,
+    log: `${attacker.name} tung ky nang gay ${damage} sat thuong len ${defender.name}.`,
+  }
+}
+
 function resolveAttack(attackerInput, defenderInput) {
   const attacker = normalizeEntity(attackerInput)
   const defender = normalizeEntity(defenderInput)
@@ -1358,10 +1564,10 @@ function normalizeSaveData(rawSaveData) {
   return {
     ...saveData,
     player: saveData.player
-      ? {
+      ? normalizePlayerSkills({
           ...saveData.player,
           realm: normalizeRealm(saveData.player.realm),
-        }
+        })
       : createDefaultPlayer(),
     herbGarden: saveData.herbGarden || createDefaultHerbGarden(),
     crafting: saveData.crafting ?? null,
@@ -1389,7 +1595,13 @@ async function runPlayerAction(uid, resolver) {
     const snap = await transaction.get(ref)
     const data = snap.exists ? snap.data() : {}
     const normalizedSave = normalizeSaveData(data?.saveData)
-    const resolved = await Promise.resolve(resolver(normalizedSave))
+    const resolved = await Promise.resolve(
+      resolver(normalizedSave, {
+        transaction,
+        userRef: ref,
+        publicRef,
+      })
+    )
 
     const safeMessage =
       typeof resolved?.message === 'string' && resolved.message.trim()
@@ -1442,6 +1654,27 @@ async function runPlayerAction(uid, resolver) {
       buildPublicPlayerPayload(uid, payload.player, profile),
       { merge: true }
     )
+
+    const finalName = normalizePlayerName(payload.player?.name)
+    const finalNameKey = normalizePlayerNameKey(finalName)
+
+    if (finalName && finalNameKey) {
+      const nameRef = db.collection('characterNames').doc(finalNameKey)
+      const nameSnap = await transaction.get(nameRef)
+      const reservedUid = String(nameSnap.data()?.uid || '')
+
+      if (!nameSnap.exists || reservedUid === uid) {
+        transaction.set(
+          nameRef,
+          {
+            uid,
+            name: finalName,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        )
+      }
+    }
 
     return {
       ok: Boolean(resolved?.ok),
@@ -1531,18 +1764,53 @@ export const setInitialNameAction = onCall(
     }
 
     try {
-      return await runPlayerAction(uid, (saveData) => {
+      return await runPlayerAction(uid, async (saveData, context) => {
         const result = setInitialPlayerName(saveData.player, newName)
 
+        if (!result?.ok) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: result?.message || 'Khong the dat dao hieu.',
+          }
+        }
+
+        const normalizedName = normalizePlayerName(result.player?.name)
+        const nameKey = normalizePlayerNameKey(normalizedName)
+
+        if (!nameKey) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Ten nhan vat khong hop le.',
+          }
+        }
+
+        const nameRef = db.collection('characterNames').doc(nameKey)
+        const nameSnap = await context.transaction.get(nameRef)
+        const reservedUid = String(nameSnap.data()?.uid || '')
+
+        if (nameSnap.exists && reservedUid && reservedUid !== uid) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Ten nhan vat nay da co nguoi su dung.',
+          }
+        }
+
         return {
-          ok: Boolean(result?.ok),
-          player: result?.player || saveData.player,
+          ok: true,
+          player: result.player,
           herbGarden: saveData.herbGarden,
           crafting: saveData.crafting,
-          profilePatch: result?.ok
-            ? { displayName: result.player?.name || '' }
-            : undefined,
-          message: result?.message || 'Khong the dat dao hieu.',
+          profilePatch: { displayName: result.player?.name || '' },
+          message: result.message || 'Khong the dat dao hieu.',
         }
       })
     } catch (error) {
@@ -1683,6 +1951,71 @@ export const unequipItemAction = onCall(
       throw new HttpsError(
         'internal',
         error?.message || 'Loi server khi thao trang bi.'
+      )
+    }
+  }
+)
+
+export const equipCombatSkillAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const skillId = String(request.data?.skillId || '')
+    const slotIndex = Number(request.data?.slotIndex)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = equipCombatSkill(saveData.player, skillId, slotIndex)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong the trang bi ky nang.',
+        }
+      })
+    } catch (error) {
+      console.error('equipCombatSkillAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi trang bi ky nang.'
+      )
+    }
+  }
+)
+
+export const unequipCombatSkillAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const slotIndex = Number(request.data?.slotIndex)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = unequipCombatSkill(saveData.player, slotIndex)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong the thao ky nang.',
+        }
+      })
+    } catch (error) {
+      console.error('unequipCombatSkillAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi thao ky nang.'
       )
     }
   }
@@ -2030,6 +2363,7 @@ export const attackDungeonEnemyAction = onCall(
   { region: 'asia-southeast1' },
   async (request) => {
     const uid = request.auth?.uid
+    const skillId = String(request.data?.skillId || '').trim() || null
 
     if (!uid) {
       throw new HttpsError('unauthenticated', 'Bạn chưa đăng nhập.')
@@ -2076,10 +2410,93 @@ export const attackDungeonEnemyAction = onCall(
           }
         }
 
-        const finalStats = getFinalStats(saveData.player)
-        const playerEntity = buildCombatEntityFromPlayer(saveData.player, finalStats)
+        const basePlayer = advanceSkillCooldowns(saveData.player)
+        const finalStats = getFinalStats(basePlayer)
+        const playerEntity = buildCombatEntityFromPlayer(basePlayer, finalStats)
         const enemyEntity = buildCombatEntityFromEnemy(saveData.currentEnemy)
-        const result = resolveCombatRound(playerEntity, enemyEntity)
+        let result
+        let turnPlayer = basePlayer
+
+        if (skillId) {
+          const skillUse = consumeCombatSkill(basePlayer, skillId)
+
+          if (!skillUse.ok) {
+            return {
+              ok: false,
+              player: saveData.player,
+              herbGarden: saveData.herbGarden,
+              crafting: saveData.crafting,
+              message: skillUse.message,
+              saveDataPatch: {
+                combatLogs: sanitizeCombatLogs([
+                  ...saveData.combatLogs,
+                  skillUse.message,
+                ]),
+              },
+            }
+          }
+
+          turnPlayer = skillUse.player
+          const boostedPlayerEntity = buildCombatEntityFromPlayer(
+            turnPlayer,
+            getFinalStats(turnPlayer)
+          )
+          const playerAttack = resolveSkillAttack(
+            boostedPlayerEntity,
+            enemyEntity,
+            skillUse.def.damageMultiplier
+          )
+          const skillLogs = [
+            `${turnPlayer.name || 'Ban'} thi trien ${skillUse.def.name}, tieu hao ${skillUse.def.manaCost} Ki, con lai ${turnPlayer.mp} Ki va cuong hoa 220% sat thuong.`,
+            playerAttack.log,
+          ]
+
+          if (playerAttack.isDefenderDead) {
+            result = {
+              playerAttack,
+              enemyAttack: null,
+              nextPlayer: {
+                ...turnPlayer,
+                hp: playerAttack.attackerNext.hp,
+                mp: turnPlayer.mp,
+              },
+              nextEnemy: {
+                ...saveData.currentEnemy,
+                hp: playerAttack.defenderNext.hp,
+                maxHp: playerAttack.defenderNext.maxHp ?? saveData.currentEnemy.maxHp,
+              },
+              isPlayerDead: false,
+              isEnemyDead: true,
+              logs: skillLogs,
+            }
+          } else {
+            const enemyAttack = resolveAttack(playerAttack.defenderNext, {
+              ...boostedPlayerEntity,
+              hp: turnPlayer.hp,
+              mp: turnPlayer.mp,
+            })
+
+            result = {
+              playerAttack,
+              enemyAttack,
+              nextPlayer: {
+                ...turnPlayer,
+                hp: enemyAttack.defenderNext.hp,
+                mp: turnPlayer.mp,
+              },
+              nextEnemy: {
+                ...saveData.currentEnemy,
+                hp: enemyAttack.attackerNext.hp,
+                maxHp: enemyAttack.attackerNext.maxHp ?? saveData.currentEnemy.maxHp,
+              },
+              isPlayerDead: enemyAttack.defenderNext.hp <= 0,
+              isEnemyDead: false,
+              logs: [...skillLogs, enemyAttack.log],
+            }
+          }
+        } else {
+          result = resolveCombatRound(playerEntity, enemyEntity)
+        }
         const combatLogs = [
           ...saveData.combatLogs,
           ...result.logs.map((text, index) =>
@@ -2098,10 +2515,10 @@ export const attackDungeonEnemyAction = onCall(
             return {
               ok: true,
               player: {
-                ...saveData.player,
+                ...turnPlayer,
                 hp: result.nextPlayer.hp,
-                exp: (Number(saveData.player?.exp) || 0) + 10,
-                spiritStones: (Number(saveData.player?.spiritStones) || 0) + 1,
+                exp: (Number(turnPlayer?.exp) || 0) + 10,
+                spiritStones: (Number(turnPlayer?.spiritStones) || 0) + 1,
               },
               herbGarden: saveData.herbGarden,
               crafting: saveData.crafting,
@@ -2128,16 +2545,16 @@ export const attackDungeonEnemyAction = onCall(
           return {
             ok: true,
             player: {
-              ...saveData.player,
+              ...turnPlayer,
               hp: result.nextPlayer.hp,
               exp:
-                (Number(saveData.player?.exp) || 0) +
+                (Number(turnPlayer?.exp) || 0) +
                 (Number(saveData.currentEnemy?.rewardExp) || 0),
               spiritStones:
-                (Number(saveData.player?.spiritStones) || 0) +
+                (Number(turnPlayer?.spiritStones) || 0) +
                 (Number(drop.spiritStones) || 0),
               herbs:
-                (Number(saveData.player?.herbs) || 0) + (Number(drop.herbs) || 0),
+                (Number(turnPlayer?.herbs) || 0) + (Number(drop.herbs) || 0),
             },
             herbGarden: saveData.herbGarden,
             crafting: saveData.crafting,
@@ -2162,7 +2579,7 @@ export const attackDungeonEnemyAction = onCall(
           return {
             ok: false,
             player: {
-              ...saveData.player,
+              ...turnPlayer,
               hp: 0,
             },
             herbGarden: saveData.herbGarden,
@@ -2184,7 +2601,7 @@ export const attackDungeonEnemyAction = onCall(
         return {
           ok: true,
           player: {
-            ...saveData.player,
+            ...turnPlayer,
             hp: result.nextPlayer.hp,
           },
           herbGarden: saveData.herbGarden,

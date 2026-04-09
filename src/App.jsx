@@ -11,6 +11,7 @@ import BagPanel from './components/BagPanel'
 import WorldPanel from './components/WorldPanel'
 import AuthScreen from './components/AuthScreen'
 import LoginScreen from './components/LoginScreen'
+import DongPhuPanel from './components/DongPhuPanel'
 import { usePublicPlayers } from './hooks/usePublicPlayers'
 import './App.css'
 
@@ -160,7 +161,7 @@ function LoadingScreen({ text = 'Đang tải...' }) {
   return (
     <div className="dao-auth-screen">
       <div className="dao-auth-card">
-        <h1 className="dao-auth-title">THIÊN ĐẠO CÁC</h1>
+        <h1 className="dao-auth-title">HUYỀN THIÊN ĐẠI LỤC</h1>
         <p className="dao-auth-subtitle">{text}</p>
       </div>
     </div>
@@ -194,6 +195,7 @@ export default function App() {
     activeTab,
     dungeon,
     finalStats,
+    skills,
     needsInitialNaming,
     message,
     crafting,
@@ -241,7 +243,7 @@ export default function App() {
       <div className="dao-shell">
         <header className="dao-topbar">
           <div className="back-link">{user.email}</div>
-          <h1 className="dao-brand">THIÊN ĐẠO CÁC</h1>
+          <h1 className="dao-brand">HUYỀN THIÊN ĐẠI LỤC</h1>
           <button className="dao-btn dao-btn-accent" onClick={handleLogout}>
             Đăng xuất
           </button>
@@ -251,11 +253,20 @@ export default function App() {
 
         <div className="dao-layout">
           <aside className="left-column">
-            <PlayerPanel player={player} finalStats={finalStats} actions={actions} actionState={actionState} />
+            <PlayerPanel
+              player={player}
+              finalStats={finalStats}
+              actions={actions}
+              actionState={actionState}
+            />
           </aside>
 
           <main className="right-column">
-            {(activeTab === 'dong-phu' || activeTab === 'cultivation') && (
+            {activeTab === 'dong-phu' && (
+              <DongPhuPanel skills={skills} actions={actions} />
+            )}
+
+            {activeTab === 'cultivation' && (
               <CultivationScreen
                 player={player}
                 actions={actions}

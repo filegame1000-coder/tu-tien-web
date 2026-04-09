@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { doc, getDoc } from 'firebase/firestore'
 import { loadGame, saveGame } from '../utils/save'
 import {
   cultivateAction,
@@ -8,6 +9,8 @@ import {
   useItemAction,
   equipItemAction,
   unequipItemAction,
+  equipCombatSkillAction,
+  unequipCombatSkillAction,
   upgradeHerbGardenAction,
   plantHerbSeedAction,
   harvestHerbSlotAction,
@@ -15,6 +18,7 @@ import {
   startAlchemyCraftAction,
   claimAlchemyCraftAction,
 } from '../services/gameApi'
+import { db } from '../firebase'
 
 import { createPlayer, setInitialPlayerName } from '../systems/player'
 
@@ -44,6 +48,13 @@ import {
   plantHerbSeed,
   unlockHerbGardenSlot,
 } from '../systems/herbGarden'
+import {
+  equipSkill,
+  getEquippedSkillEntries,
+  getLearnedSkillEntries,
+  normalizePlayerSkills,
+  unequipSkill,
+} from '../systems/skills'
 
 import { useDungeonCombat } from './useDungeonCombat'
 import { useCombatLog } from './useCombatLog'
@@ -59,15 +70,17 @@ function normalizeSaveData(raw) {
       }
     : createPlayer()
 
+  const skillReadyPlayer = normalizePlayerSkills(normalizedPlayer)
+
   return {
-    player: normalizedPlayer,
+    player: skillReadyPlayer,
     herbGarden: normalizeHerbGarden(raw.herbGarden || createHerbGarden()),
     crafting: raw.crafting ?? null,
-    message: raw.message || 'Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.',
+    message: raw.message || 'Bắt đầu con đường tu luyện.',
     logs:
       Array.isArray(raw.logs) && raw.logs.length > 0
         ? raw.logs
-        : ['Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.'],
+        : ['Bắt đầu con đường tu luyện.'],
     combatLogs: Array.isArray(raw.combatLogs) ? raw.combatLogs.slice(-40) : [],
     activeTab: raw.activeTab || 'cultivation',
     currentDungeonFloor: raw.currentDungeonFloor ?? null,
@@ -79,6 +92,15 @@ function normalizeSaveData(raw) {
 
 function buildDefaultSave() {
   return normalizeSaveData({}) || {}
+}
+
+async function loadCloudSave(uid) {
+  if (!uid) return null
+
+  const snap = await getDoc(doc(db, 'users', uid))
+  if (!snap.exists()) return null
+
+  return normalizeSaveData(snap.data()?.saveData)
 }
 
 export function usePlayer(user) {
@@ -96,12 +118,12 @@ export function usePlayer(user) {
   )
 
   const [message, setMessage] = useState(
-    saved.message || 'Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.'
+    saved.message || 'Bắt đầu con đường tu luyện.'
   )
   const [logs, setLogs] = useState(
     Array.isArray(saved.logs) && saved.logs.length > 0
       ? saved.logs
-      : ['Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.']
+      : ['Bắt đầu con đường tu luyện.']
   )
 
   const [activeTab, setActiveTab] = useState(saved.activeTab || 'cultivation')
@@ -114,6 +136,7 @@ export function usePlayer(user) {
     saved.dungeonCooldownUntil ?? null
   )
   const [pendingAction, setPendingAction] = useState(null)
+  const [loading, setLoading] = useState(true)
 
   const { combatLogs, pushCombatLog, clearCombatLog, replaceCombatLog } = useCombatLog()
   const actionInFlightRef = useRef(false)
@@ -127,8 +150,8 @@ export function usePlayer(user) {
 
   const cooldownText = useMemo(() => {
     const check = canEnterDungeon(dungeonCooldownUntil)
-    if (check.ok) return 'CÃ³ thá»ƒ vÃ o bÃ­ cáº£nh'
-    return `Há»“i láº¡i sau: ${formatCooldown(check.remainMs)}`
+    if (check.ok) return 'Có thể vào bí cảnh'
+    return `Hồi lại sau: ${formatCooldown(check.remainMs)}`
   }, [dungeonCooldownUntil])
 
   const isCultivating = pendingAction === 'cultivate'
@@ -145,7 +168,7 @@ export function usePlayer(user) {
 
     if (result.player) {
       setPlayer({
-        ...result.player,
+        ...normalizePlayerSkills(result.player),
         realm: normalizeRealm(result.player.realm),
       })
     }
@@ -184,10 +207,8 @@ export function usePlayer(user) {
     }
   }
 
-  useEffect(() => {
-    const nextSaved = normalizeSaveData(loadGame(user?.uid)) || buildDefaultSave()
-
-    setPlayer(nextSaved.player || createPlayer())
+  function applyLoadedSave(nextSaved) {
+    setPlayer(normalizePlayerSkills(nextSaved.player || createPlayer()))
     setCrafting(nextSaved.crafting ?? null)
     setCraftingRemainMs(getAlchemyRemainingMs(nextSaved.crafting ?? null))
     setHerbGarden(
@@ -207,9 +228,68 @@ export function usePlayer(user) {
     setKillCount(nextSaved.killCount ?? 0)
     setDungeonCooldownUntil(nextSaved.dungeonCooldownUntil ?? null)
     replaceCombatLog(nextSaved.combatLogs ?? [])
+  }
+
+  useEffect(() => {
+    const nextSaved = normalizeSaveData(loadGame(user?.uid)) || buildDefaultSave()
+
+    setPlayer(normalizePlayerSkills(nextSaved.player || createPlayer()))
+    setCrafting(nextSaved.crafting ?? null)
+    setCraftingRemainMs(getAlchemyRemainingMs(nextSaved.crafting ?? null))
+    setHerbGarden(
+      normalizeHerbGarden(nextSaved.herbGarden) || createHerbGarden()
+    )
+
+    setMessage(nextSaved.message || 'Bắt đầu con đường tu luyện.')
+    setLogs(
+      Array.isArray(nextSaved.logs) && nextSaved.logs.length > 0
+        ? nextSaved.logs
+        : ['Bắt đầu con đường tu luyện.']
+    )
+
+    setActiveTab(nextSaved.activeTab || 'cultivation')
+    setCurrentDungeonFloor(nextSaved.currentDungeonFloor ?? null)
+    setCurrentEnemy(nextSaved.currentEnemy ?? null)
+    setKillCount(nextSaved.killCount ?? 0)
+    setDungeonCooldownUntil(nextSaved.dungeonCooldownUntil ?? null)
+    replaceCombatLog(nextSaved.combatLogs ?? [])
     setPendingAction(null)
     actionInFlightRef.current = false
     alchemyClaimInFlightRef.current = false
+  }, [user?.uid, replaceCombatLog])
+
+  useEffect(() => {
+    let active = true
+    publicSyncRef.current = ''
+
+    if (!user?.uid) {
+      setLoading(false)
+      return () => {
+        active = false
+      }
+    }
+
+    setLoading(true)
+
+    ;(async () => {
+      try {
+        const cloudSave = await loadCloudSave(user.uid)
+        if (!active) return
+
+        if (cloudSave) {
+          applyLoadedSave(cloudSave)
+          saveGame(cloudSave, user.uid)
+        }
+      } catch (error) {
+        console.error('Cloud save hydrate error:', error)
+      } finally {
+        if (active) setLoading(false)
+      }
+    })()
+
+    return () => {
+      active = false
+    }
   }, [user?.uid, replaceCombatLog])
 
   useEffect(() => {
@@ -274,7 +354,7 @@ export function usePlayer(user) {
 
       if (!result?.ok) {
         if (!silent) {
-          pushLog(result?.message || 'Khong the nhan dan duoc.')
+          pushLog(result?.message || 'Không thể nhận đan được.')
         }
         return false
       }
@@ -298,7 +378,7 @@ export function usePlayer(user) {
         return true
       }
       if (!silent) {
-        pushLog('Khong ket noi duoc may chu luyen dan.')
+        pushLog('Không kết nối được máy chủ luyện đan.')
       }
       return false
     } finally {
@@ -375,7 +455,7 @@ export function usePlayer(user) {
 
     if (!user) {
       setPlayer((prev) => cultivate(prev))
-      pushLog('Báº¡n tu luyá»‡n vÃ  nháº­n 1 EXP.')
+      pushLog('Bạn tu luyện và nhận 1 EXP.')
       return true
     }
 
@@ -386,7 +466,7 @@ export function usePlayer(user) {
       const result = await cultivateAction()
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Tu luyá»‡n tháº¥t báº¡i.')
+        pushLog(result?.message || 'Tu luyện thất bại.')
         return false
       }
 
@@ -396,10 +476,10 @@ export function usePlayer(user) {
       console.error('Cultivate sync error:', error)
       if (allowDevFallback) {
         setPlayer((prev) => cultivate(prev))
-        pushLog('Ban tu luyen va nhan 1 EXP. [dev local]')
+        pushLog('Bạn tu luyện và nhận 1 EXP. [dev local]')
         return true
       }
-      pushLog('Khong ket noi duoc may chu tu luyen.')
+      pushLog('Không kết nối được máy chủ tu luyện.')
       return false
     } finally {
       actionInFlightRef.current = false
@@ -436,7 +516,7 @@ export function usePlayer(user) {
       const result = await breakthroughAction()
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Dot pha that bai.')
+        pushLog(result?.message || 'Đột phá thất bại.')
         return false
       }
 
@@ -462,7 +542,7 @@ export function usePlayer(user) {
 
         return success
       }
-      pushLog('Khong ket noi duoc may chu dot pha.')
+      pushLog('Không kết nối được máy chủ đột phá.')
       return false
     } finally {
       actionInFlightRef.current = false
@@ -488,7 +568,7 @@ export function usePlayer(user) {
       const result = await setInitialNameAction(newName)
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Khong the dat dao hieu.')
+        pushLog(result?.message || 'Không thể đặt đạo hiệu.')
         return false
       }
 
@@ -508,7 +588,7 @@ export function usePlayer(user) {
         pushLog(`${result.message} [dev local]`)
         return true
       }
-      pushLog('Khong ket noi duoc may chu dat dao hieu.')
+      pushLog('Không kết nối được máy chủ đặt đạo hiệu.')
       return false
     }
   }
@@ -534,7 +614,7 @@ export function usePlayer(user) {
       const result = await equipItemAction(instanceId)
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Khong the trang bi vat pham.')
+        pushLog(result?.message || 'Không thể trang bị vật phẩm.')
         return false
       }
 
@@ -557,7 +637,95 @@ export function usePlayer(user) {
         })
         return true
       }
-      pushLog('Khong ket noi duoc may chu trang bi.')
+      pushLog('Không kết nối được máy chủ trang bị.')
+      return false
+    }
+  }
+
+  async function handleEquipSkill(skillId, slotIndex) {
+    const applyLocal = () => {
+      let success = false
+
+      setPlayer((prev) => {
+        const result = equipSkill(prev, skillId, slotIndex)
+
+        if (!result.ok) {
+          pushLog(result.message)
+          return prev
+        }
+
+        success = true
+        pushLog(result.message)
+        return result.player
+      })
+
+      return success
+    }
+
+    if (!user) {
+      return applyLocal()
+    }
+
+    try {
+      const result = await equipCombatSkillAction(skillId, slotIndex)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể trang bị kỹ năng.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Equip skill sync error:', error)
+      if (allowDevFallback) {
+        return applyLocal()
+      }
+      pushLog('Không kết nối được máy chủ trang bị kỹ năng.')
+      return false
+    }
+  }
+
+  async function handleUnequipSkill(slotIndex) {
+    const applyLocal = () => {
+      let success = false
+
+      setPlayer((prev) => {
+        const result = unequipSkill(prev, slotIndex)
+
+        if (!result.ok) {
+          pushLog(result.message)
+          return prev
+        }
+
+        success = true
+        pushLog(result.message)
+        return result.player
+      })
+
+      return success
+    }
+
+    if (!user) {
+      return applyLocal()
+    }
+
+    try {
+      const result = await unequipCombatSkillAction(slotIndex)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể tháo kỹ năng.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Unequip skill sync error:', error)
+      if (allowDevFallback) {
+        return applyLocal()
+      }
+      pushLog('Không kết nối được máy chủ tháo kỹ năng.')
       return false
     }
   }
@@ -583,7 +751,7 @@ export function usePlayer(user) {
       const result = await unequipItemAction(slot)
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Khong the thao trang bi.')
+        pushLog(result?.message || 'Không thể tháo trang bị.')
         return false
       }
 
@@ -606,7 +774,7 @@ export function usePlayer(user) {
         })
         return true
       }
-      pushLog('Khong ket noi duoc may chu thao trang bi.')
+      pushLog('Không kết nối được máy chủ tháo trang bị.')
       return false
     }
   }
@@ -617,7 +785,7 @@ export function usePlayer(user) {
         const result = useConsumable(prev, itemId)
 
         if (!result.ok) {
-          pushLog(result.message || 'Khong the su dung vat pham.')
+          pushLog(result.message || 'Không thể sử dụng vật phẩm.')
           return prev
         }
 
@@ -631,7 +799,7 @@ export function usePlayer(user) {
       const result = await useItemAction(itemId)
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Khong the su dung vat pham.')
+        pushLog(result?.message || 'Không thể sử dụng vật phẩm.')
         return false
       }
 
@@ -644,7 +812,7 @@ export function usePlayer(user) {
           const result = useConsumable(prev, itemId)
 
           if (!result.ok) {
-            pushLog(result.message || 'Khong the su dung vat pham.')
+            pushLog(result.message || 'Không thể sử dụng vật phẩm.')
             return prev
           }
 
@@ -653,14 +821,14 @@ export function usePlayer(user) {
         })
         return true
       }
-      pushLog('Khong ket noi duoc may chu su dung vat pham.')
+      pushLog('Không kết nối được máy chủ sử dụng vật phẩm.')
       return false
     }
   }
 
   async function handleCraftPill(recipeId) {
     if (crafting) {
-      pushLog('Lo dan dang ban.')
+      pushLog('Lò đan đang bận.')
       return false
     }
 
@@ -683,7 +851,7 @@ export function usePlayer(user) {
       const result = await startAlchemyCraftAction(recipeId)
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Khong the bat dau luyen dan.')
+        pushLog(result?.message || 'Không thể bắt đầu luyện đan.')
         return false
       }
 
@@ -705,7 +873,7 @@ export function usePlayer(user) {
         pushLog(`${result.message} [dev local]`)
         return true
       }
-      pushLog('Khong ket noi duoc may chu luyen dan.')
+      pushLog('Không kết nối được máy chủ luyện đan.')
       return false
     }
   }
@@ -729,7 +897,7 @@ export function usePlayer(user) {
       const result = await upgradeHerbGardenAction()
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Khong the mo them o linh dien.')
+        pushLog(result?.message || 'Không thể mở thêm ô linh điền.')
         return false
       }
 
@@ -750,7 +918,7 @@ export function usePlayer(user) {
         pushLog(`${result.message} [dev local]`)
         return true
       }
-      pushLog('Khong ket noi duoc may chu linh dien.')
+      pushLog('Không kết nối được máy chủ linh điền.')
       return false
     }
   }
@@ -773,7 +941,7 @@ export function usePlayer(user) {
       const result = await plantHerbSeedAction(slotIndex)
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Khong the gieo hat giong.')
+        pushLog(result?.message || 'Không thể gieo hạt giống.')
         return false
       }
 
@@ -793,7 +961,7 @@ export function usePlayer(user) {
         pushLog(`${result.message} [dev local]`)
         return true
       }
-      pushLog('Khong ket noi duoc may chu linh dien.')
+      pushLog('Không kết nối được máy chủ linh điền.')
       return false
     }
   }
@@ -817,7 +985,7 @@ export function usePlayer(user) {
       const result = await harvestHerbSlotAction(slotIndex)
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Khong the thu hoach o nay.')
+        pushLog(result?.message || 'Không thể thu hoạch ô này.')
         return false
       }
 
@@ -838,7 +1006,7 @@ export function usePlayer(user) {
         pushLog(`${result.message} [dev local]`)
         return true
       }
-      pushLog('Khong ket noi duoc may chu linh dien.')
+      pushLog('Không kết nối được máy chủ linh điền.')
       return false
     }
   }
@@ -862,7 +1030,7 @@ export function usePlayer(user) {
       const result = await harvestAllHerbsAction()
 
       if (!result?.ok) {
-        pushLog(result?.message || 'Khong co o nao san sang thu hoach.')
+        pushLog(result?.message || 'Không có ô nào sẵn sàng thu hoạch.')
         return false
       }
 
@@ -883,7 +1051,7 @@ export function usePlayer(user) {
         pushLog(`${result.message} [dev local]`)
         return true
       }
-      pushLog('Khong ket noi duoc may chu linh dien.')
+      pushLog('Không kết nối được máy chủ linh điền.')
       return false
     }
   }
@@ -923,7 +1091,7 @@ export function usePlayer(user) {
   })
 
   return {
-    loading: false,
+    loading,
     player,
     herbGarden,
     crafting,
@@ -934,6 +1102,10 @@ export function usePlayer(user) {
     activeTab,
     breakthroughCost,
     finalStats,
+    skills: {
+      learned: getLearnedSkillEntries(player),
+      equipped: getEquippedSkillEntries(player),
+    },
     needsInitialNaming,
     actionState: {
       pendingAction,
@@ -955,6 +1127,8 @@ export function usePlayer(user) {
       cultivate: handleCultivate,
       breakthrough: handleBreakthrough,
       setInitialName: handleSetInitialName,
+      equipSkill: handleEquipSkill,
+      unequipSkill: handleUnequipSkill,
       equipItem: handleEquipItem,
       unequipItem: handleUnequipItem,
       useItem: handleUseItem,

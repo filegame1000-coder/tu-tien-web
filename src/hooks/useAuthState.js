@@ -17,7 +17,10 @@ function mapFirebaseError(error) {
   if (code.includes('invalid-credential')) return 'Sai email hoặc mật khẩu.'
   if (code.includes('user-not-found')) return 'Không tìm thấy tài khoản.'
   if (code.includes('wrong-password')) return 'Sai mật khẩu.'
-  if (code.includes('too-many-requests')) return 'Thử quá nhiều lần. Vui lòng đợi một lúc.'
+  if (code.includes('too-many-requests')) {
+    return 'Thử quá nhiều lần. Vui lòng đợi một lúc.'
+  }
+
   return error?.message || 'Đã có lỗi xảy ra.'
 }
 
