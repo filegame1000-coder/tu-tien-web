@@ -8,8 +8,10 @@ import GameTabs from './components/GameTabs'
 import EquipmentPanel from './components/EquipmentPanel'
 import LogPanel from './components/LogPanel'
 import BagPanel from './components/BagPanel'
+import WorldPanel from './components/WorldPanel'
 import AuthScreen from './components/AuthScreen'
 import LoginScreen from './components/LoginScreen'
+import { usePublicPlayers } from './hooks/usePublicPlayers'
 import './App.css'
 
 function getMinorStageLabel(exp) {
@@ -198,6 +200,7 @@ export default function App() {
     craftingRemainMs,
     actionState,
   } = usePlayer(user)
+  const { publicPlayers, loading: playersLoading } = usePublicPlayers(user?.uid)
 
   if (!ready) {
     return <LoadingScreen text="Đang kết nối hệ thống tài khoản..." />
@@ -290,6 +293,10 @@ export default function App() {
                 finalStats={finalStats}
                 combatLogs={combatLogs}
               />
+            )}
+
+            {activeTab === 'thien-ha' && (
+              <WorldPanel players={publicPlayers} loading={playersLoading} />
             )}
           </main>
         </div>

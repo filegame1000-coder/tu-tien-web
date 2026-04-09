@@ -51,5 +51,10 @@ service cloud.firestore {
 
       allow delete: if false;
     }
+
+    match /publicPlayers/{uid} {
+      allow read: if true;
+      allow write: if false;
+    }
   }
 }

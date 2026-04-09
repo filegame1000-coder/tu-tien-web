@@ -23,6 +23,61 @@ export async function breakthroughAction() {
   }
 }
 
+export async function setInitialNameAction(name) {
+  try {
+    const fn = httpsCallable(functions, 'setInitialNameAction')
+    const res = await fn({ name })
+    return res.data
+  } catch (error) {
+    console.error('setInitialNameAction error:', error)
+    throw error
+  }
+}
+
+export async function syncPublicPlayerAction() {
+  try {
+    const fn = httpsCallable(functions, 'syncPublicPlayerAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('syncPublicPlayerAction error:', error)
+    throw error
+  }
+}
+
+export async function useItemAction(itemId) {
+  try {
+    const fn = httpsCallable(functions, 'useItemAction')
+    const res = await fn({ itemId })
+    return res.data
+  } catch (error) {
+    console.error('useItemAction error:', error)
+    throw error
+  }
+}
+
+export async function equipItemAction(instanceId) {
+  try {
+    const fn = httpsCallable(functions, 'equipItemAction')
+    const res = await fn({ instanceId })
+    return res.data
+  } catch (error) {
+    console.error('equipItemAction error:', error)
+    throw error
+  }
+}
+
+export async function unequipItemAction(slot) {
+  try {
+    const fn = httpsCallable(functions, 'unequipItemAction')
+    const res = await fn({ slot })
+    return res.data
+  } catch (error) {
+    console.error('unequipItemAction error:', error)
+    throw error
+  }
+}
+
 export async function enterDungeonAction(floor) {
   try {
     const fn = httpsCallable(functions, 'enterDungeonAction')

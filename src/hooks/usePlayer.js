@@ -3,6 +3,11 @@ import { loadGame, saveGame } from '../utils/save'
 import {
   cultivateAction,
   breakthroughAction,
+  setInitialNameAction,
+  syncPublicPlayerAction,
+  useItemAction,
+  equipItemAction,
+  unequipItemAction,
   upgradeHerbGardenAction,
   plantHerbSeedAction,
   harvestHerbSlotAction,
@@ -113,6 +118,7 @@ export function usePlayer(user) {
   const { combatLogs, pushCombatLog, clearCombatLog, replaceCombatLog } = useCombatLog()
   const actionInFlightRef = useRef(false)
   const alchemyClaimInFlightRef = useRef(false)
+  const publicSyncRef = useRef('')
   const allowDevFallback = import.meta.env.DEV
 
   const finalStats = useMemo(() => getFinalStats(player), [player])
@@ -205,6 +211,26 @@ export function usePlayer(user) {
     actionInFlightRef.current = false
     alchemyClaimInFlightRef.current = false
   }, [user?.uid, replaceCombatLog])
+
+  useEffect(() => {
+    if (!user?.uid) return
+
+    const normalizedName = String(player?.name || '').trim()
+    if (!normalizedName) return
+
+    const syncKey = `${user.uid}:${normalizedName}:${player?.realm || ''}:${player?.stage || 1}`
+    if (publicSyncRef.current === syncKey) return
+
+    publicSyncRef.current = syncKey
+
+    ;(async () => {
+      try {
+        await syncPublicPlayerAction()
+      } catch (error) {
+        console.error('Public player sync error:', error)
+      }
+    })()
+  }, [user?.uid, player?.name, player?.realm, player?.stage])
 
   useEffect(() => {
     if (!crafting) {
@@ -444,61 +470,192 @@ export function usePlayer(user) {
     }
   }
 
-  function handleSetInitialName(newName) {
-    const result = setInitialPlayerName(player, newName)
+  async function handleSetInitialName(newName) {
+    if (!user) {
+      const result = setInitialPlayerName(player, newName)
 
-    if (!result.ok) {
+      if (!result.ok) {
+        pushLog(result.message)
+        return false
+      }
+
+      setPlayer(result.player)
       pushLog(result.message)
-      return false
+      return true
     }
 
-    setPlayer(result.player)
-    pushLog(result.message)
-    return true
+    try {
+      const result = await setInitialNameAction(newName)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the dat dao hieu.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Set initial name sync error:', error)
+      if (allowDevFallback) {
+        const result = setInitialPlayerName(player, newName)
+
+        if (!result.ok) {
+          pushLog(result.message)
+          return false
+        }
+
+        setPlayer(result.player)
+        pushLog(`${result.message} [dev local]`)
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu dat dao hieu.')
+      return false
+    }
   }
 
-  function handleEquipItem(instanceId) {
-    setPlayer((prev) => {
-      const result = equipItem(prev, instanceId)
+  async function handleEquipItem(instanceId) {
+    if (!user) {
+      setPlayer((prev) => {
+        const result = equipItem(prev, instanceId)
 
-      if (!result.ok) {
+        if (!result.ok) {
+          pushLog(result.message)
+          return prev
+        }
+
+        const nextPlayer = clampPlayerHp(result.player)
         pushLog(result.message)
-        return prev
+        return nextPlayer
+      })
+      return true
+    }
+
+    try {
+      const result = await equipItemAction(instanceId)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the trang bi vat pham.')
+        return false
       }
 
-      const nextPlayer = clampPlayerHp(result.player)
-      pushLog(result.message)
-      return nextPlayer
-    })
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Equip item sync error:', error)
+      if (allowDevFallback) {
+        setPlayer((prev) => {
+          const result = equipItem(prev, instanceId)
+
+          if (!result.ok) {
+            pushLog(result.message)
+            return prev
+          }
+
+          const nextPlayer = clampPlayerHp(result.player)
+          pushLog(`${result.message} [dev local]`)
+          return nextPlayer
+        })
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu trang bi.')
+      return false
+    }
   }
 
-  function handleUnequipItem(slot) {
-    setPlayer((prev) => {
-      const result = unequipItem(prev, slot)
+  async function handleUnequipItem(slot) {
+    if (!user) {
+      setPlayer((prev) => {
+        const result = unequipItem(prev, slot)
 
-      if (!result.ok) {
+        if (!result.ok) {
+          pushLog(result.message)
+          return prev
+        }
+
+        const nextPlayer = clampPlayerHp(result.player)
         pushLog(result.message)
-        return prev
+        return nextPlayer
+      })
+      return true
+    }
+
+    try {
+      const result = await unequipItemAction(slot)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the thao trang bi.')
+        return false
       }
 
-      const nextPlayer = clampPlayerHp(result.player)
-      pushLog(result.message)
-      return nextPlayer
-    })
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Unequip item sync error:', error)
+      if (allowDevFallback) {
+        setPlayer((prev) => {
+          const result = unequipItem(prev, slot)
+
+          if (!result.ok) {
+            pushLog(result.message)
+            return prev
+          }
+
+          const nextPlayer = clampPlayerHp(result.player)
+          pushLog(`${result.message} [dev local]`)
+          return nextPlayer
+        })
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu thao trang bi.')
+      return false
+    }
   }
 
-  function handleUseItem(itemId) {
-    setPlayer((prev) => {
-      const result = useConsumable(prev, itemId)
+  async function handleUseItem(itemId) {
+    if (!user) {
+      setPlayer((prev) => {
+        const result = useConsumable(prev, itemId)
 
-      if (!result.ok) {
-        pushLog(result.message || 'Khong the su dung vat pham.')
-        return prev
+        if (!result.ok) {
+          pushLog(result.message || 'Khong the su dung vat pham.')
+          return prev
+        }
+
+        pushLog(result.message)
+        return result.player
+      })
+      return true
+    }
+
+    try {
+      const result = await useItemAction(itemId)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the su dung vat pham.')
+        return false
       }
 
-      pushLog(result.message)
-      return result.player
-    })
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Use item sync error:', error)
+      if (allowDevFallback) {
+        setPlayer((prev) => {
+          const result = useConsumable(prev, itemId)
+
+          if (!result.ok) {
+            pushLog(result.message || 'Khong the su dung vat pham.')
+            return prev
+          }
+
+          pushLog(`${result.message} [dev local]`)
+          return result.player
+        })
+        return true
+      }
+      pushLog('Khong ket noi duoc may chu su dung vat pham.')
+      return false
+    }
   }
 
   async function handleCraftPill(recipeId) {

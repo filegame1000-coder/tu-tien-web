@@ -10,22 +10,30 @@ const REALM_MORTAL = 'Phàm Nhân'
 const REALM_QI = 'Luyện Khí'
 const EQUIPMENT_DEFS = {
   beginner_sword: {
+    slot: 'weapon',
+    levelRequired: 1,
     stats: {
       damage: 2,
     },
   },
   cloth_armor: {
+    slot: 'armor',
+    levelRequired: 1,
     stats: {
       maxHp: 10,
       defense: 1,
     },
   },
   wind_boots: {
+    slot: 'boots',
+    levelRequired: 1,
     stats: {
       dodgeChance: 0.03,
     },
   },
   spirit_ring: {
+    slot: 'ring',
+    levelRequired: 1,
     stats: {
       damage: 1,
       maxHp: 5,
@@ -171,23 +179,76 @@ const CONSUMABLE_DEFS = {
   hp_potion_small: {
     id: 'hp_potion_small',
     name: 'Binh HP',
+    effect: {
+      hp: 100,
+    },
   },
   mp_potion_small: {
     id: 'mp_potion_small',
     name: 'Binh Ki',
+    effect: {
+      mp: 100,
+    },
   },
   thoi_the_dan: {
     id: 'thoi_the_dan',
     name: 'Thoi The Dan',
+    effect: {
+      baseHp: 10,
+    },
   },
   thoi_than_dan: {
     id: 'thoi_than_dan',
     name: 'Thoi Than Dan',
+    effect: {
+      baseMp: 10,
+    },
   },
   thoi_thanh_dan: {
     id: 'thoi_thanh_dan',
     name: 'Thoi Thanh Dan',
+    effect: {
+      baseDamage: 1,
+    },
   },
+}
+
+function normalizePlayerName(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ')
+}
+
+function setInitialPlayerName(player, newName) {
+  const normalizedName = normalizePlayerName(newName)
+
+  if (!normalizedName) {
+    return {
+      ok: false,
+      message: 'Vui long nhap ten nhan vat.',
+    }
+  }
+
+  if (normalizedName.length < 2) {
+    return {
+      ok: false,
+      message: 'Ten nhan vat phai tu 2 ky tu tro len.',
+    }
+  }
+
+  if (normalizedName.length > 20) {
+    return {
+      ok: false,
+      message: 'Ten nhan vat toi da 20 ky tu.',
+    }
+  }
+
+  return {
+    ok: true,
+    player: {
+      ...player,
+      name: normalizedName,
+    },
+    message: `Dao hieu da dinh: ${normalizedName}.`,
+  }
 }
 
 function createEmptyHerbSlot(index) {
@@ -432,6 +493,205 @@ function addItemToInventory(inventory = [], itemToAdd) {
       quantity: itemToAdd.quantity || 1,
     },
   ]
+}
+
+function removeConsumableFromInventory(inventory = [], itemId, amount = 1) {
+  return inventory
+    .map((item) => {
+      if (item?.id === itemId && !item?.defId) {
+        return {
+          ...item,
+          quantity: Math.max(0, (item.quantity || 0) - amount),
+        }
+      }
+
+      return item
+    })
+    .filter((item) => {
+      if (item?.id && !item?.defId) {
+        return (item.quantity || 0) > 0
+      }
+
+      return true
+    })
+}
+
+function getInventoryItemByInstanceId(inventory = [], instanceId) {
+  return inventory.find((item) => item?.instanceId === instanceId) || null
+}
+
+function canEquipItem(player, inventoryItem) {
+  const def = EQUIPMENT_DEFS[inventoryItem?.defId]
+
+  if (!def) {
+    return {
+      ok: false,
+      message: 'Khong tim thay du lieu trang bi.',
+    }
+  }
+
+  if ((Number(player?.stage) || 1) < (Number(def.levelRequired) || 1)) {
+    return {
+      ok: false,
+      message: `Can canh gioi/tang toi thieu ${def.levelRequired}.`,
+    }
+  }
+
+  return { ok: true, def }
+}
+
+function equipItem(player, instanceId) {
+  const inventoryItem = getInventoryItemByInstanceId(player?.inventory || [], instanceId)
+
+  if (!inventoryItem) {
+    return {
+      ok: false,
+      message: 'Khong tim thay vat pham trong tui do.',
+    }
+  }
+
+  const check = canEquipItem(player, inventoryItem)
+  if (!check.ok) return check
+
+  const slot = check.def.slot
+  const oldInstanceId = player?.equipment?.[slot] || null
+
+  return {
+    ok: true,
+    message: `Da trang bi ${check.def.name || inventoryItem.defId}.`,
+    player: clampPlayerHp({
+      ...player,
+      equipment: {
+        ...(player?.equipment || {}),
+        [slot]: instanceId,
+      },
+      inventory: (player?.inventory || []).map((item) => {
+        if (item?.instanceId === instanceId) {
+          return { ...item, equipped: true }
+        }
+
+        if (item?.instanceId === oldInstanceId) {
+          return { ...item, equipped: false }
+        }
+
+        return item
+      }),
+    }),
+  }
+}
+
+function unequipItem(player, slot) {
+  const instanceId = player?.equipment?.[slot]
+
+  if (!instanceId) {
+    return {
+      ok: false,
+      message: 'O trang bi dang trong.',
+    }
+  }
+
+  return {
+    ok: true,
+    message: 'Da thao trang bi.',
+    player: clampPlayerHp({
+      ...player,
+      equipment: {
+        ...(player?.equipment || {}),
+        [slot]: null,
+      },
+      inventory: (player?.inventory || []).map((item) =>
+        item?.instanceId === instanceId ? { ...item, equipped: false } : item
+      ),
+    }),
+  }
+}
+
+function useConsumable(player, itemId) {
+  const item = (player?.inventory || []).find((entry) => entry?.id === itemId)
+
+  if (!item || (item.quantity || 0) <= 0) {
+    return {
+      ok: false,
+      message: 'Khong co vat pham.',
+    }
+  }
+
+  const def = CONSUMABLE_DEFS[itemId]
+
+  if (!def) {
+    return {
+      ok: false,
+      message: 'Vat pham khong hop le.',
+    }
+  }
+
+  const finalStats = getFinalStats(player)
+  const nextPlayer = {
+    ...player,
+    baseStats: {
+      ...(player?.baseStats || {}),
+    },
+  }
+
+  if (def.effect?.hp) {
+    nextPlayer.hp = Math.min(
+      (Number(player?.hp) || 0) + Number(def.effect.hp || 0),
+      Number(finalStats?.maxHp) || 0
+    )
+  }
+
+  if (def.effect?.mp) {
+    nextPlayer.mp = Math.min(
+      (Number(player?.mp) || 0) + Number(def.effect.mp || 0),
+      Number(finalStats?.maxMp) || 0
+    )
+  }
+
+  if (def.effect?.baseHp) {
+    nextPlayer.baseStats.maxHp =
+      (Number(nextPlayer.baseStats.maxHp) || 0) + Number(def.effect.baseHp || 0)
+
+    const nextFinalStats = getFinalStats(nextPlayer)
+    nextPlayer.hp = Math.min(
+      Math.max(
+        Number(player?.hp) || 0,
+        Number(nextPlayer.baseStats.maxHp) || 0
+      ),
+      Number(nextFinalStats?.maxHp) || 0
+    )
+  }
+
+  if (def.effect?.baseMp) {
+    nextPlayer.baseStats.maxMp =
+      (Number(nextPlayer.baseStats.maxMp) || 0) + Number(def.effect.baseMp || 0)
+
+    const nextFinalStats = getFinalStats(nextPlayer)
+    nextPlayer.mp = Math.min(
+      Math.max(
+        Number(player?.mp) || 0,
+        Number(nextPlayer.baseStats.maxMp) || 0
+      ),
+      Number(nextFinalStats?.maxMp) || 0
+    )
+  }
+
+  if (def.effect?.baseDamage) {
+    nextPlayer.baseStats.damage =
+      (Number(nextPlayer.baseStats.damage) || 0) +
+      Number(def.effect.baseDamage || 0)
+  }
+
+  nextPlayer.inventory = removeConsumableFromInventory(
+    player?.inventory || [],
+    itemId,
+    1
+  )
+
+  return {
+    ok: true,
+    player: nextPlayer,
+    message: `Da dung ${def.name}.`,
+  }
 }
 
 function startAlchemyCraft(player, recipeId, now = Date.now()) {
@@ -765,6 +1025,53 @@ function getFinalStats(player) {
   }
 }
 
+function getPowerScore(player) {
+  const finalStats = getFinalStats(player)
+
+  return Math.round(
+    (Number(finalStats.maxHp) || 0) +
+      (Number(finalStats.maxMp) || 0) * 0.3 +
+      (Number(finalStats.damage) || 0) * 12 +
+      (Number(finalStats.defense) || 0) * 10 +
+      (Number(player?.stage) || 1) * 25
+  )
+}
+
+function clampPlayerHp(player) {
+  const finalStats = getFinalStats(player)
+  const maxHp = Number(finalStats?.maxHp) || 1
+  const currentHp = Number(player?.hp ?? maxHp) || maxHp
+
+  return {
+    ...player,
+    hp: Math.max(0, Math.min(currentHp, maxHp)),
+  }
+}
+
+function buildPublicPlayerPayload(uid, player, profile) {
+  const finalStats = getFinalStats(player)
+  const normalizedName = normalizePlayerName(
+    player?.name || profile?.displayName || 'Vo Danh'
+  )
+
+  return {
+    uid,
+    name: normalizedName || 'Vo Danh',
+    realm: normalizeRealm(player?.realm),
+    stage: Number(player?.stage) || 1,
+    exp: Number(player?.exp) || 0,
+    power: getPowerScore(player),
+    spiritStones: Number(player?.spiritStones) || 0,
+    herbs: Number(player?.herbs) || 0,
+    hp: Number(player?.hp) || 0,
+    maxHp: Number(finalStats?.maxHp) || 0,
+    damage: Number(finalStats?.damage) || 0,
+    defense: Number(finalStats?.defense) || 0,
+    updatedAt: FieldValue.serverTimestamp(),
+    lastSeenAt: FieldValue.serverTimestamp(),
+  }
+}
+
 function toNumber(value, fallback = 0) {
   return Number.isFinite(value) ? value : fallback
 }
@@ -1076,6 +1383,7 @@ function normalizeSaveData(rawSaveData) {
 
 async function runPlayerAction(uid, resolver) {
   const ref = db.collection('users').doc(uid)
+  const publicRef = db.collection('publicPlayers').doc(uid)
 
   const result = await db.runTransaction(async (transaction) => {
     const snap = await transaction.get(ref)
@@ -1092,6 +1400,13 @@ async function runPlayerAction(uid, resolver) {
       resolved?.saveDataPatch && typeof resolved.saveDataPatch === 'object'
         ? resolved.saveDataPatch
         : {}
+    const profile =
+      resolved?.profilePatch && typeof resolved.profilePatch === 'object'
+        ? {
+            ...(data?.profile || { displayName: '' }),
+            ...resolved.profilePatch,
+          }
+        : data?.profile || { displayName: '' }
 
     const payload = {
       ...normalizedSave,
@@ -1111,14 +1426,20 @@ async function runPlayerAction(uid, resolver) {
 
     transaction.set(
       ref,
-      {
-        email: data?.email || '',
-        role: data?.role || 'player',
-        profile: data?.profile || { displayName: '' },
-        saveData: payload,
-        updatedAt: FieldValue.serverTimestamp(),
-        lastActionAt: FieldValue.serverTimestamp(),
-      },
+        {
+          email: data?.email || '',
+          role: data?.role || 'player',
+          profile,
+          saveData: payload,
+          updatedAt: FieldValue.serverTimestamp(),
+          lastActionAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      )
+
+    transaction.set(
+      publicRef,
+      buildPublicPlayerPayload(uid, payload.player, profile),
       { merge: true }
     )
 
@@ -1194,6 +1515,174 @@ export const breakthroughAction = onCall(
       throw new HttpsError(
         'internal',
         error?.message || 'Lỗi server khi đột phá.'
+      )
+    }
+  }
+)
+
+export const setInitialNameAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const newName = String(request.data?.name || '')
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = setInitialPlayerName(saveData.player, newName)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          profilePatch: result?.ok
+            ? { displayName: result.player?.name || '' }
+            : undefined,
+          message: result?.message || 'Khong the dat dao hieu.',
+        }
+      })
+    } catch (error) {
+      console.error('setInitialNameAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi dat dao hieu.'
+      )
+    }
+  }
+)
+
+export const syncPublicPlayerAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      const ref = db.collection('users').doc(uid)
+      const publicRef = db.collection('publicPlayers').doc(uid)
+
+      await db.runTransaction(async (transaction) => {
+        const snap = await transaction.get(ref)
+        const data = snap.exists ? snap.data() : {}
+        const normalizedSave = normalizeSaveData(data?.saveData)
+        const profile = data?.profile || { displayName: '' }
+
+        transaction.set(
+          publicRef,
+          buildPublicPlayerPayload(uid, normalizedSave.player, profile),
+          { merge: true }
+        )
+      })
+
+      return { ok: true }
+    } catch (error) {
+      console.error('syncPublicPlayerAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi dong bo ho so cong khai.'
+      )
+    }
+  }
+)
+
+export const useItemAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const itemId = String(request.data?.itemId || '')
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = useConsumable(saveData.player, itemId)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong the su dung vat pham.',
+        }
+      })
+    } catch (error) {
+      console.error('useItemAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi su dung vat pham.'
+      )
+    }
+  }
+)
+
+export const equipItemAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const instanceId = String(request.data?.instanceId || '')
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = equipItem(saveData.player, instanceId)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong the trang bi vat pham.',
+        }
+      })
+    } catch (error) {
+      console.error('equipItemAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi trang bi vat pham.'
+      )
+    }
+  }
+)
+
+export const unequipItemAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const slot = String(request.data?.slot || '')
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = unequipItem(saveData.player, slot)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong the thao trang bi.',
+        }
+      })
+    } catch (error) {
+      console.error('unequipItemAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi thao trang bi.'
       )
     }
   }

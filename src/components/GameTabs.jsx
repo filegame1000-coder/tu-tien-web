@@ -1,13 +1,13 @@
 const extraTabs = [
-  { key: 'dong-phu', label: 'Động phủ', disabled: false },
-  { key: 'linh-dien', label: 'Linh điền', disabled: false },
-  { key: 'van-thu-vien', label: 'Vạn thư viện', disabled: true },
-  { key: 'hanh-trang', label: 'Hành trang', disabled: false },
-  { key: 'alchemy', label: 'Luyện đan các', disabled: false },
-  { key: 'cultivation', label: 'Luyện khí các', disabled: false },
-  { key: 'dungeon', label: 'Lịch luyện', disabled: false },
-  { key: 'thien-ha', label: 'Thiên hạ', disabled: true },
-  { key: 'su-kien', label: 'Sự kiện', disabled: true },
+  { key: 'dong-phu', label: 'Dong phu', disabled: false },
+  { key: 'linh-dien', label: 'Linh dien', disabled: false },
+  { key: 'van-thu-vien', label: 'Van thu vien', disabled: true },
+  { key: 'hanh-trang', label: 'Hanh trang', disabled: false },
+  { key: 'alchemy', label: 'Luyen dan cac', disabled: false },
+  { key: 'cultivation', label: 'Luyen khi cac', disabled: false },
+  { key: 'dungeon', label: 'Lich luyen', disabled: false },
+  { key: 'thien-ha', label: 'Thien ha', disabled: false },
+  { key: 'su-kien', label: 'Su kien', disabled: true },
 ]
 
 export default function GameTabs({ activeTab, onChange }) {
