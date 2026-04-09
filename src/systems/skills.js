@@ -4,10 +4,27 @@ export const SKILL_DEFS = {
   tram_kiem_quyet: {
     id: 'tram_kiem_quyet',
     name: 'Trảm Kiếm Quyết',
-    description: 'Gây 220% sát thương thực tế sau khi đã tính phòng thủ của đối thủ.',
+    description:
+      'Gây 220% sát thương thực tế sau khi đã tính phòng thủ của đối thủ.',
     manaCost: 50,
     cooldownTurns: 1,
     damageMultiplier: 2.2,
+  },
+  ngu_kiem_thuat: {
+    id: 'ngu_kiem_thuat',
+    name: 'Ngự Kiếm Thuật',
+    description: 'Ngự kiếm phá địch, gây 160% sát thương thực tế sau phòng thủ.',
+    manaCost: 30,
+    cooldownTurns: 1,
+    damageMultiplier: 1.6,
+  },
+  liet_hoa_kiem: {
+    id: 'liet_hoa_kiem',
+    name: 'Liệt Hỏa Kiếm',
+    description: 'Hỏa kiếm bùng nổ, gây 300% sát thương thực tế sau phòng thủ.',
+    manaCost: 80,
+    cooldownTurns: 2,
+    damageMultiplier: 3,
   },
 }
 

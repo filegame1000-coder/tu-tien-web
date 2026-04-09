@@ -222,6 +222,42 @@ const SKILL_DEFS = {
     cooldownTurns: 1,
     damageMultiplier: 2.2,
   },
+  ngu_kiem_thuat: {
+    id: 'ngu_kiem_thuat',
+    name: 'Ngu Kiem Thuat',
+    manaCost: 30,
+    cooldownTurns: 1,
+    damageMultiplier: 1.6,
+  },
+  liet_hoa_kiem: {
+    id: 'liet_hoa_kiem',
+    name: 'Liet Hoa Kiem',
+    manaCost: 80,
+    cooldownTurns: 2,
+    damageMultiplier: 3,
+  },
+}
+
+const SHOP_DEFS = {
+  equipment: {
+    beginner_sword: { price: 20 },
+    cloth_armor: { price: 20 },
+    wind_boots: { price: 50 },
+    spirit_ring: { price: 60 },
+  },
+  skills: {
+    ngu_kiem_thuat: { price: 180 },
+    liet_hoa_kiem: { price: 320 },
+  },
+  consumables: {
+    hp_potion_small: { price: 15 },
+    mp_potion_small: { price: 15 },
+  },
+  pills: {
+    thoi_the_dan: { price: 120 },
+    thoi_than_dan: { price: 120 },
+    thoi_thanh_dan: { price: 180 },
+  },
 }
 
 function sanitizeSkillId(skillId) {
@@ -677,6 +713,16 @@ function addItemToInventory(inventory = [], itemToAdd) {
   ]
 }
 
+function createEquipmentInstance(defId) {
+  return {
+    instanceId: `eq_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    defId,
+    enhanceLevel: 0,
+    equipped: false,
+    bonusStats: {},
+  }
+}
+
 function removeConsumableFromInventory(inventory = [], itemId, amount = 1) {
   return inventory
     .map((item) => {
@@ -873,6 +919,223 @@ function useConsumable(player, itemId) {
     ok: true,
     player: nextPlayer,
     message: `Da dung ${def.name}.`,
+  }
+}
+
+function purchaseShopItem(player, sectionId, itemId) {
+  const section = SHOP_DEFS[sectionId]
+  if (!section) {
+    return { ok: false, message: 'Gian hang khong ton tai.' }
+  }
+
+  const config = section[itemId]
+  if (!config) {
+    return { ok: false, message: 'Vat pham khong co trong gian hang nay.' }
+  }
+
+  const price = Math.max(0, Number(config.price) || 0)
+
+  if ((Number(player?.spiritStones) || 0) < price) {
+    return { ok: false, message: `Khong du ${price} linh thach.` }
+  }
+
+  if (sectionId === 'equipment') {
+    const def = EQUIPMENT_DEFS[itemId]
+    if (!def) return { ok: false, message: 'Trang bi khong ton tai.' }
+
+    return {
+      ok: true,
+      player: {
+        ...player,
+        spiritStones: (Number(player?.spiritStones) || 0) - price,
+        inventory: [...(player?.inventory || []), createEquipmentInstance(itemId)],
+      },
+      message: `Da mua ${def.name}.`,
+    }
+  }
+
+  if (sectionId === 'skills') {
+    const normalizedPlayer = normalizePlayerSkills(player)
+    const safeSkillId = sanitizeSkillId(itemId)
+    const def = safeSkillId ? SKILL_DEFS[safeSkillId] : null
+
+    if (!safeSkillId || !def) {
+      return { ok: false, message: 'Ky nang khong ton tai.' }
+    }
+
+    if (normalizedPlayer.learnedSkills.includes(safeSkillId)) {
+      return { ok: false, message: 'Ban da hoc ky nang nay roi.' }
+    }
+
+    return {
+      ok: true,
+      player: normalizePlayerSkills({
+        ...normalizedPlayer,
+        spiritStones: (Number(normalizedPlayer?.spiritStones) || 0) - price,
+        learnedSkills: [...normalizedPlayer.learnedSkills, safeSkillId],
+      }),
+      message: `Da mua bi tich ${def.name}.`,
+    }
+  }
+
+  const def = CONSUMABLE_DEFS[itemId]
+  if (!def) {
+    return { ok: false, message: 'Vat pham khong ton tai.' }
+  }
+
+  return {
+    ok: true,
+    player: {
+      ...player,
+      spiritStones: (Number(player?.spiritStones) || 0) - price,
+      inventory: addItemToInventory(player?.inventory || [], {
+        id: itemId,
+        quantity: 1,
+      }),
+    },
+    message: `Da mua ${def.name}.`,
+  }
+}
+
+const REWARD_BASE_STAT_KEYS = ['maxHp', 'maxMp', 'damage', 'defense']
+
+function normalizeGiftCode(code) {
+  return String(code || '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9-_]/g, '')
+}
+
+function createRandomGiftCode() {
+  return `HTDL-${Math.random().toString(36).slice(2, 8).toUpperCase()}`
+}
+
+function normalizeRewardPayload(rawReward) {
+  const reward = rawReward && typeof rawReward === 'object' ? rawReward : {}
+
+  const consumables = Array.isArray(reward.consumables)
+    ? reward.consumables
+        .map((entry) => ({
+          itemId: String(entry?.itemId || '').trim(),
+          quantity: Math.max(1, Number(entry?.quantity) || 1),
+        }))
+        .filter((entry) => Boolean(CONSUMABLE_DEFS[entry.itemId]))
+    : []
+
+  const equipments = Array.isArray(reward.equipments)
+    ? reward.equipments
+        .map((entry) => ({
+          defId: String(entry?.defId || '').trim(),
+          quantity: Math.max(1, Number(entry?.quantity) || 1),
+        }))
+        .filter((entry) => Boolean(EQUIPMENT_DEFS[entry.defId]))
+    : []
+
+  const skills = Array.isArray(reward.skills)
+    ? Array.from(
+        new Set(
+          reward.skills
+            .map(sanitizeSkillId)
+            .filter(Boolean)
+        )
+      )
+    : []
+
+  const rawBaseStats =
+    reward.baseStats && typeof reward.baseStats === 'object' ? reward.baseStats : {}
+
+  const baseStats = Object.fromEntries(
+    REWARD_BASE_STAT_KEYS.map((key) => [key, Math.max(0, Number(rawBaseStats[key]) || 0)])
+      .filter(([, value]) => value > 0)
+  )
+
+  return {
+    spiritStones: Math.max(0, Number(reward.spiritStones) || 0),
+    herbs: Math.max(0, Number(reward.herbs) || 0),
+    consumables,
+    equipments,
+    skills,
+    baseStats,
+  }
+}
+
+function hasRewardPayloadContent(reward) {
+  return (
+    (Number(reward?.spiritStones) || 0) > 0 ||
+    (Number(reward?.herbs) || 0) > 0 ||
+    (reward?.consumables?.length || 0) > 0 ||
+    (reward?.equipments?.length || 0) > 0 ||
+    (reward?.skills?.length || 0) > 0 ||
+    Object.keys(reward?.baseStats || {}).length > 0
+  )
+}
+
+function applyRewardPayload(player, reward) {
+  if (!hasRewardPayloadContent(reward)) {
+    return {
+      ok: false,
+      message: 'Code nay khong co phan thuong hop le.',
+    }
+  }
+
+  let nextPlayer = normalizePlayerSkills(player)
+  let nextInventory = [...(nextPlayer?.inventory || [])]
+  let nextLearnedSkills = [...(nextPlayer?.learnedSkills || [])]
+
+  for (const consumable of reward.consumables || []) {
+    nextInventory = addItemToInventory(nextInventory, {
+      id: consumable.itemId,
+      quantity: consumable.quantity,
+    })
+  }
+
+  for (const equipment of reward.equipments || []) {
+    for (let index = 0; index < equipment.quantity; index += 1) {
+      nextInventory.push(createEquipmentInstance(equipment.defId))
+    }
+  }
+
+  for (const skillId of reward.skills || []) {
+    if (!nextLearnedSkills.includes(skillId)) {
+      nextLearnedSkills.push(skillId)
+    }
+  }
+
+  nextPlayer = normalizePlayerSkills({
+    ...nextPlayer,
+    spiritStones: (Number(nextPlayer?.spiritStones) || 0) + (Number(reward.spiritStones) || 0),
+    herbs: (Number(nextPlayer?.herbs) || 0) + (Number(reward.herbs) || 0),
+    inventory: nextInventory,
+    learnedSkills: nextLearnedSkills,
+    baseStats: {
+      ...(nextPlayer?.baseStats || {}),
+      maxHp:
+        (Number(nextPlayer?.baseStats?.maxHp) || 0) +
+        (Number(reward?.baseStats?.maxHp) || 0),
+      maxMp:
+        (Number(nextPlayer?.baseStats?.maxMp) || 0) +
+        (Number(reward?.baseStats?.maxMp) || 0),
+      damage:
+        (Number(nextPlayer?.baseStats?.damage) || 0) +
+        (Number(reward?.baseStats?.damage) || 0),
+      defense:
+        (Number(nextPlayer?.baseStats?.defense) || 0) +
+        (Number(reward?.baseStats?.defense) || 0),
+    },
+  })
+
+  return {
+    ok: true,
+    player: nextPlayer,
+  }
+}
+
+async function assertAdmin(uid) {
+  const snap = await db.collection('users').doc(uid).get()
+  const role = String(snap.data()?.role || 'player')
+
+  if (role !== 'admin') {
+    throw new HttpsError('permission-denied', 'Chi admin moi duoc thuc hien thao tac nay.')
   }
 }
 
@@ -2016,6 +2279,230 @@ export const unequipCombatSkillAction = onCall(
       throw new HttpsError(
         'internal',
         error?.message || 'Loi server khi thao ky nang.'
+      )
+    }
+  }
+)
+
+export const purchaseShopItemAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const sectionId = String(request.data?.sectionId || '').trim()
+    const itemId = String(request.data?.itemId || '').trim()
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData) => {
+        const result = purchaseShopItem(saveData.player, sectionId, itemId)
+
+        return {
+          ok: Boolean(result?.ok),
+          player: result?.player || saveData.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: result?.message || 'Khong the mua vat pham.',
+        }
+      })
+    } catch (error) {
+      console.error('purchaseShopItemAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi mua vat pham.'
+      )
+    }
+  }
+)
+
+export const redeemRewardCodeAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const code = normalizeGiftCode(request.data?.code)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!code) {
+      throw new HttpsError('invalid-argument', 'Code khong hop le.')
+    }
+
+    try {
+      return await runPlayerAction(uid, async (saveData, context) => {
+        const codeRef = db.collection('giftCodes').doc(code)
+        const claimRef = codeRef.collection('claims').doc(uid)
+        const codeSnap = await context.transaction.get(codeRef)
+
+        if (!codeSnap.exists) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Code khong ton tai hoac da het han.',
+          }
+        }
+
+        const codeData = codeSnap.data() || {}
+
+        if (codeData.active === false) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Code nay da bi khoa.',
+          }
+        }
+
+        if (Number(codeData.expiresAt) > 0 && Date.now() > Number(codeData.expiresAt)) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Code nay da het han.',
+          }
+        }
+
+        if (
+          Number(codeData.maxUses) > 0 &&
+          Number(codeData.useCount) >= Number(codeData.maxUses)
+        ) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Code nay da het luot su dung.',
+          }
+        }
+
+        const claimSnap = await context.transaction.get(claimRef)
+        if (claimSnap.exists) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Tai khoan nay da nhap code nay roi.',
+          }
+        }
+
+        const reward = normalizeRewardPayload(codeData.reward)
+        const applied = applyRewardPayload(saveData.player, reward)
+
+        if (!applied.ok) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: applied.message || 'Khong the nhan thuong tu code.',
+          }
+        }
+
+        context.transaction.set(
+          codeRef,
+          {
+            useCount: FieldValue.increment(1),
+            lastRedeemedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        )
+        context.transaction.set(claimRef, {
+          uid,
+          claimedAt: FieldValue.serverTimestamp(),
+        })
+
+        return {
+          ok: true,
+          player: applied.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: `Da nhan code ${code} thanh cong.`,
+        }
+      })
+    } catch (error) {
+      console.error('redeemRewardCodeAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi doi code.'
+      )
+    }
+  }
+)
+
+export const createRewardCodeAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    await assertAdmin(uid)
+
+    const reward = normalizeRewardPayload(request.data?.reward)
+    const requestedCode = normalizeGiftCode(request.data?.code)
+    const note = String(request.data?.note || '').trim().slice(0, 200)
+    const maxUses = Math.max(1, Number(request.data?.maxUses) || 1)
+
+    if (!hasRewardPayloadContent(reward)) {
+      throw new HttpsError('invalid-argument', 'Phan thuong code khong hop le.')
+    }
+
+    let finalCode = ''
+
+    try {
+      await db.runTransaction(async (transaction) => {
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const candidate = requestedCode || createRandomGiftCode()
+          const codeRef = db.collection('giftCodes').doc(candidate)
+          const codeSnap = await transaction.get(codeRef)
+
+          if (codeSnap.exists) {
+            if (requestedCode) {
+              throw new HttpsError('already-exists', 'Code nay da ton tai.')
+            }
+            continue
+          }
+
+          finalCode = candidate
+          transaction.set(codeRef, {
+            code: candidate,
+            reward,
+            maxUses,
+            useCount: 0,
+            note,
+            active: true,
+            createdBy: uid,
+            createdAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          })
+          break
+        }
+      })
+
+      if (!finalCode) {
+        throw new HttpsError('already-exists', 'Khong the tao code moi, vui long thu lai.')
+      }
+
+      return {
+        ok: true,
+        code: finalCode,
+        message: `Da tao code ${finalCode}.`,
+      }
+    } catch (error) {
+      console.error('createRewardCodeAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi tao code.'
       )
     }
   }

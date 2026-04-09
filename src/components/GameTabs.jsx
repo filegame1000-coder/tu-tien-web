@@ -1,4 +1,6 @@
 const extraTabs = [
+  { key: 'tien-cac', label: 'Tiên Các', disabled: false },
+  { key: 'mat-lenh', label: 'Mật lệnh', disabled: false },
   { key: 'dong-phu', label: 'Động phủ', disabled: false },
   { key: 'linh-dien', label: 'Linh điền', disabled: false },
   { key: 'van-thu-vien', label: 'Vạn thư viện', disabled: true },
@@ -15,7 +17,11 @@ export default function GameTabs({ activeTab, onChange }) {
     <div className="dao-tabs">
       {extraTabs.map((tab) => {
         const mappedKey =
-          tab.key === 'dong-phu'
+          tab.key === 'tien-cac'
+            ? 'shop'
+            : tab.key === 'mat-lenh'
+            ? 'codes'
+            : tab.key === 'dong-phu'
             ? 'dong-phu'
             : tab.key === 'linh-dien'
             ? 'farm'

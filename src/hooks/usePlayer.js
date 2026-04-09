@@ -11,6 +11,9 @@ import {
   unequipItemAction,
   equipCombatSkillAction,
   unequipCombatSkillAction,
+  purchaseShopItemAction,
+  redeemRewardCodeAction,
+  createRewardCodeAction,
   upgradeHerbGardenAction,
   plantHerbSeedAction,
   harvestHerbSlotAction,
@@ -55,6 +58,7 @@ import {
   normalizePlayerSkills,
   unequipSkill,
 } from '../systems/skills'
+import { purchaseShopItem } from '../systems/shop'
 
 import { useDungeonCombat } from './useDungeonCombat'
 import { useCombatLog } from './useCombatLog'
@@ -730,6 +734,90 @@ export function usePlayer(user) {
     }
   }
 
+  async function handlePurchaseShopItem(sectionId, itemId) {
+    const applyLocal = () => {
+      const result = purchaseShopItem(player, sectionId, itemId)
+
+      if (!result.ok) {
+        pushLog(result.message)
+        return false
+      }
+
+      setPlayer(normalizePlayerSkills(result.player))
+      pushLog(result.message)
+      return true
+    }
+
+    if (!user) {
+      return applyLocal()
+    }
+
+    try {
+      const result = await purchaseShopItemAction(sectionId, itemId)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'KhÃ´ng thá»ƒ mua váº­t pháº©m.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Purchase shop item sync error:', error)
+      if (allowDevFallback) {
+        return applyLocal()
+      }
+      pushLog('KhÃ´ng káº¿t ná»‘i Ä‘Æ°á»£c TiÃªn CÃ¡c.')
+      return false
+    }
+  }
+
+  async function handleRedeemCode(code) {
+    if (!user) {
+      pushLog('Hãy đăng nhập để nhập code.')
+      return false
+    }
+
+    try {
+      const result = await redeemRewardCodeAction(code)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể đổi code.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Redeem reward code error:', error)
+      pushLog('Không kết nối được máy chủ đổi code.')
+      return false
+    }
+  }
+
+  async function handleCreateRewardCode(payload) {
+    if (!user) {
+      pushLog('Hãy đăng nhập tài khoản admin để tạo code.')
+      return null
+    }
+
+    try {
+      const result = await createRewardCodeAction(payload)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể tạo code.')
+        return null
+      }
+
+      pushLog(result.message || `Đã tạo code ${result.code}.`)
+      return result
+    } catch (error) {
+      console.error('Create reward code error:', error)
+      pushLog('Không kết nối được máy chủ tạo code.')
+      return null
+    }
+  }
+
   async function handleUnequipItem(slot) {
     if (!user) {
       setPlayer((prev) => {
@@ -1127,6 +1215,9 @@ export function usePlayer(user) {
       cultivate: handleCultivate,
       breakthrough: handleBreakthrough,
       setInitialName: handleSetInitialName,
+      purchaseShopItem: handlePurchaseShopItem,
+      redeemCode: handleRedeemCode,
+      createRewardCode: handleCreateRewardCode,
       equipSkill: handleEquipSkill,
       unequipSkill: handleUnequipSkill,
       equipItem: handleEquipItem,

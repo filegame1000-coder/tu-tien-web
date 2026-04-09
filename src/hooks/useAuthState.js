@@ -31,17 +31,8 @@ export function useAuthState() {
   const [message, setMessage] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser || null)
-      setReady(true)
-    })
-
-    return () => {
-      if (typeof unsub === 'function') unsub()
-    }
-  }, [])
+  const [userProfile, setUserProfile] = useState(null)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   async function ensureUserDoc(firebaseUser) {
     const ref = doc(db, 'users', firebaseUser.uid)
@@ -65,6 +56,47 @@ export function useAuthState() {
     }
   }
 
+  async function loadUserMeta(firebaseUser) {
+    if (!firebaseUser?.uid) {
+      setUserProfile(null)
+      setIsAdmin(false)
+      return
+    }
+
+    const snap = await getDoc(doc(db, 'users', firebaseUser.uid))
+    const data = snap.exists() ? snap.data() : null
+    setUserProfile(data)
+    setIsAdmin(data?.role === 'admin')
+  }
+
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+      setUser(firebaseUser || null)
+
+      if (!firebaseUser) {
+        setUserProfile(null)
+        setIsAdmin(false)
+        setReady(true)
+        return
+      }
+
+      try {
+        await ensureUserDoc(firebaseUser)
+        await loadUserMeta(firebaseUser)
+      } catch (error) {
+        console.error('Load user meta error:', error)
+        setUserProfile(null)
+        setIsAdmin(false)
+      } finally {
+        setReady(true)
+      }
+    })
+
+    return () => {
+      if (typeof unsub === 'function') unsub()
+    }
+  }, [])
+
   async function handleRegister() {
     if (!email || !password) {
       setMessage('Vui lòng nhập email và mật khẩu.')
@@ -77,6 +109,7 @@ export function useAuthState() {
 
       const result = await createUserWithEmailAndPassword(auth, email, password)
       await ensureUserDoc(result.user)
+      await loadUserMeta(result.user)
 
       setMessage('Đăng ký thành công.')
     } catch (error) {
@@ -98,6 +131,7 @@ export function useAuthState() {
 
       const result = await signInWithEmailAndPassword(auth, email, password)
       await ensureUserDoc(result.user)
+      await loadUserMeta(result.user)
 
       setMessage('Đăng nhập thành công.')
     } catch (error) {
@@ -114,6 +148,8 @@ export function useAuthState() {
       setEmail('')
       setPassword('')
       setMessage('')
+      setUserProfile(null)
+      setIsAdmin(false)
     } catch (error) {
       setMessage(mapFirebaseError(error))
     } finally {
@@ -128,6 +164,8 @@ export function useAuthState() {
     message,
     email,
     password,
+    userProfile,
+    isAdmin,
     setEmail,
     setPassword,
     handleRegister,

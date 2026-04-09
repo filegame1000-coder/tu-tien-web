@@ -12,6 +12,8 @@ import WorldPanel from './components/WorldPanel'
 import AuthScreen from './components/AuthScreen'
 import LoginScreen from './components/LoginScreen'
 import DongPhuPanel from './components/DongPhuPanel'
+import ShopPanel from './components/ShopPanel'
+import CodePanel from './components/CodePanel'
 import { usePublicPlayers } from './hooks/usePublicPlayers'
 import './App.css'
 
@@ -175,6 +177,7 @@ export default function App() {
     ready,
     loading: authLoading,
     message: authMessage,
+    isAdmin,
     email,
     password,
     setEmail,
@@ -264,6 +267,14 @@ export default function App() {
           <main className="right-column">
             {activeTab === 'dong-phu' && (
               <DongPhuPanel skills={skills} actions={actions} />
+            )}
+
+            {activeTab === 'shop' && (
+              <ShopPanel player={player} actions={actions} />
+            )}
+
+            {activeTab === 'codes' && (
+              <CodePanel player={player} actions={actions} isAdmin={isAdmin} />
             )}
 
             {activeTab === 'cultivation' && (

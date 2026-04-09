@@ -100,6 +100,39 @@ export async function unequipCombatSkillAction(slotIndex) {
   }
 }
 
+export async function purchaseShopItemAction(sectionId, itemId) {
+  try {
+    const fn = httpsCallable(functions, 'purchaseShopItemAction')
+    const res = await fn({ sectionId, itemId })
+    return res.data
+  } catch (error) {
+    console.error('purchaseShopItemAction error:', error)
+    throw error
+  }
+}
+
+export async function redeemRewardCodeAction(code) {
+  try {
+    const fn = httpsCallable(functions, 'redeemRewardCodeAction')
+    const res = await fn({ code })
+    return res.data
+  } catch (error) {
+    console.error('redeemRewardCodeAction error:', error)
+    throw error
+  }
+}
+
+export async function createRewardCodeAction(payload) {
+  try {
+    const fn = httpsCallable(functions, 'createRewardCodeAction')
+    const res = await fn(payload)
+    return res.data
+  } catch (error) {
+    console.error('createRewardCodeAction error:', error)
+    throw error
+  }
+}
+
 export async function enterDungeonAction(floor) {
   try {
     const fn = httpsCallable(functions, 'enterDungeonAction')
