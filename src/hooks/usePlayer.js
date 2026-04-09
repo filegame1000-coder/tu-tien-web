@@ -14,6 +14,7 @@ import {
   purchaseShopItemAction,
   redeemRewardCodeAction,
   createRewardCodeAction,
+  deleteRewardCodeAction,
   upgradeHerbGardenAction,
   plantHerbSeedAction,
   harvestHerbSlotAction,
@@ -818,6 +819,29 @@ export function usePlayer(user) {
     }
   }
 
+  async function handleDeleteRewardCode(code) {
+    if (!user) {
+      pushLog('Hãy đăng nhập tài khoản admin để xóa code.')
+      return false
+    }
+
+    try {
+      const result = await deleteRewardCodeAction(code)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể xóa code.')
+        return false
+      }
+
+      pushLog(result.message || `Đã khóa code ${code}.`)
+      return true
+    } catch (error) {
+      console.error('Delete reward code error:', error)
+      pushLog('Không kết nối được máy chủ xóa code.')
+      return false
+    }
+  }
+
   async function handleUnequipItem(slot) {
     if (!user) {
       setPlayer((prev) => {
@@ -1218,6 +1242,7 @@ export function usePlayer(user) {
       purchaseShopItem: handlePurchaseShopItem,
       redeemCode: handleRedeemCode,
       createRewardCode: handleCreateRewardCode,
+      deleteRewardCode: handleDeleteRewardCode,
       equipSkill: handleEquipSkill,
       unequipSkill: handleUnequipSkill,
       equipItem: handleEquipItem,

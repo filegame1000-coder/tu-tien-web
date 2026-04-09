@@ -133,6 +133,17 @@ export async function createRewardCodeAction(payload) {
   }
 }
 
+export async function deleteRewardCodeAction(code) {
+  try {
+    const fn = httpsCallable(functions, 'deleteRewardCodeAction')
+    const res = await fn({ code })
+    return res.data
+  } catch (error) {
+    console.error('deleteRewardCodeAction error:', error)
+    throw error
+  }
+}
+
 export async function enterDungeonAction(floor) {
   try {
     const fn = httpsCallable(functions, 'enterDungeonAction')

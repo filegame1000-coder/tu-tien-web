@@ -2508,6 +2508,57 @@ export const createRewardCodeAction = onCall(
   }
 )
 
+export const deleteRewardCodeAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const code = normalizeGiftCode(request.data?.code)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!code) {
+      throw new HttpsError('invalid-argument', 'Code khong hop le.')
+    }
+
+    await assertAdmin(uid)
+
+    try {
+      const codeRef = db.collection('giftCodes').doc(code)
+      const snap = await codeRef.get()
+
+      if (!snap.exists) {
+        return {
+          ok: false,
+          message: 'Khong tim thay code nay.',
+        }
+      }
+
+      await codeRef.set(
+        {
+          active: false,
+          deletedAt: FieldValue.serverTimestamp(),
+          deletedBy: uid,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      )
+
+      return {
+        ok: true,
+        message: `Da khoa code ${code}.`,
+      }
+    } catch (error) {
+      console.error('deleteRewardCodeAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi xoa code.'
+      )
+    }
+  }
+)
+
 export const upgradeHerbGardenAction = onCall(
   { region: 'asia-southeast1' },
   async (request) => {
