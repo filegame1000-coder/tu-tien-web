@@ -66,4 +66,16 @@ export const equipmentDefs = {
     price: 60,
     effects: [],
   },
+
+  lang_bong: {
+    id: 'lang_bong',
+    name: 'Lang Bổng',
+    slot: EQUIPMENT_SLOTS.WEAPON,
+    rarity: EQUIPMENT_RARITY.EPIC,
+    levelRequired: 1,
+    stats: {},
+    price: 0,
+    effects: [],
+    description: 'Vũ khí của Lang Vương, mang theo sát khí cuồng bạo.',
+  },
 }

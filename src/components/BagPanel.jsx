@@ -19,8 +19,8 @@ function renderStats(stats = {}) {
   if (entries.length === 0) return null
 
   const statLabels = {
-    maxHp: 'HP',
-    maxMp: 'MP',
+    maxHp: 'Sinh lực',
+    maxMp: 'Pháp lực',
     damage: 'Công',
     defense: 'Thủ',
     critChance: 'Bạo kích',
@@ -76,11 +76,11 @@ function renderStats(stats = {}) {
 function renderConsumableEffect(effect = {}) {
   const lines = []
 
-  if (effect.hp) lines.push(`Hồi ngay +${effect.hp} HP`)
-  if (effect.mp) lines.push(`Hồi ngay +${effect.mp} MP`)
-  if (effect.baseHp) lines.push(`Tăng vĩnh viễn +${effect.baseHp} HP gốc`)
-  if (effect.baseMp) lines.push(`Tăng vĩnh viễn +${effect.baseMp} MP gốc`)
-  if (effect.baseDamage) lines.push(`Tăng vĩnh viễn +${effect.baseDamage} damage gốc`)
+  if (effect.hp) lines.push(`Hồi ngay +${effect.hp} Sinh lực`)
+  if (effect.mp) lines.push(`Hồi ngay +${effect.mp} Pháp lực`)
+  if (effect.baseHp) lines.push(`Tăng vĩnh viễn +${effect.baseHp} Sinh lực gốc`)
+  if (effect.baseMp) lines.push(`Tăng vĩnh viễn +${effect.baseMp} Pháp lực gốc`)
+  if (effect.baseDamage) lines.push(`Tăng vĩnh viễn +${effect.baseDamage} công gốc`)
 
   if (lines.length === 0) return null
 
@@ -127,11 +127,11 @@ export default function BagPanel({ player, actions }) {
             <strong>{player?.herbs ?? 0}</strong>
           </div>
           <div className="resource-chip">
-            <span>HP</span>
+            <span>Sinh lực</span>
             <strong>{player?.hp ?? 0}</strong>
           </div>
           <div className="resource-chip">
-            <span>MP</span>
+            <span>Pháp lực</span>
             <strong>{player?.mp ?? 0}</strong>
           </div>
         </div>

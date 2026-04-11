@@ -32,12 +32,19 @@ const EQUIPMENT_DEFS = {
     },
   },
   spirit_ring: {
+    name: 'Tu Linh Gioi',
     slot: 'ring',
     levelRequired: 1,
     stats: {
       damage: 1,
       maxHp: 5,
     },
+  },
+  lang_bong: {
+    name: 'Lang Bong',
+    slot: 'weapon',
+    levelRequired: 1,
+    stats: {},
   },
 }
 
@@ -211,7 +218,84 @@ const CONSUMABLE_DEFS = {
       baseDamage: 1,
     },
   },
+  yeu_dan: {
+    id: 'yeu_dan',
+    name: 'Yeu Dan',
+    effect: {
+      baseDamage: 1,
+    },
+  },
 }
+
+const VN_TZ_OFFSET_MS = 7 * 60 * 60 * 1000
+const DAY_MS = 24 * 60 * 60 * 1000
+
+const DAILY_LOGIN_REWARDS = [
+  { day: 1, reward: { spiritStones: 200 } },
+  { day: 2, reward: { consumables: [{ itemId: 'hp_potion_small', quantity: 2 }] } },
+  { day: 3, reward: { consumables: [{ itemId: 'mp_potion_small', quantity: 2 }] } },
+  { day: 4, reward: { spiritStones: 300 } },
+  { day: 5, reward: { consumables: [{ itemId: 'thoi_the_dan', quantity: 1 }] } },
+  { day: 6, reward: { consumables: [{ itemId: 'thoi_than_dan', quantity: 1 }] } },
+  {
+    day: 7,
+    reward: {
+      spiritStones: 500,
+      consumables: [{ itemId: 'yeu_dan', quantity: 1 }],
+    },
+  },
+]
+
+const DAILY_MISSION_DEFS = [
+  {
+    id: 'cultivate_10',
+    title: 'Tu luyen 10 lan',
+    target: 10,
+    activityPoints: 10,
+    reward: { spiritStones: 150 },
+  },
+  {
+    id: 'dungeon_attack_10',
+    title: 'Danh bi canh 10 luot',
+    target: 10,
+    activityPoints: 15,
+    reward: { spiritStones: 200 },
+  },
+  {
+    id: 'herb_harvest_3',
+    title: 'Thu hoach linh dien 3 lan',
+    target: 3,
+    activityPoints: 10,
+    reward: { herbs: 10 },
+  },
+  {
+    id: 'alchemy_1',
+    title: 'Luyen dan 1 lan',
+    target: 1,
+    activityPoints: 10,
+    reward: { consumables: [{ itemId: 'mp_potion_small', quantity: 1 }] },
+  },
+  {
+    id: 'world_boss_attack_3',
+    title: 'Tan cong Boss The Gioi 3 lan',
+    target: 3,
+    activityPoints: 20,
+    reward: { consumables: [{ itemId: 'yeu_dan', quantity: 1 }] },
+  },
+]
+
+const DAILY_ACTIVITY_CHESTS = [
+  { threshold: 20, reward: { spiritStones: 100 } },
+  { threshold: 40, reward: { consumables: [{ itemId: 'hp_potion_small', quantity: 2 }] } },
+  { threshold: 60, reward: { consumables: [{ itemId: 'thoi_thanh_dan', quantity: 1 }] } },
+]
+
+const DAILY_MISSION_MAP = Object.fromEntries(
+  DAILY_MISSION_DEFS.map((mission) => [mission.id, mission])
+)
+const DAILY_ACTIVITY_CHEST_MAP = Object.fromEntries(
+  DAILY_ACTIVITY_CHESTS.map((chest) => [String(chest.threshold), chest])
+)
 
 const MAX_EQUIPPED_SKILLS = 4
 const SKILL_DEFS = {
@@ -713,13 +797,14 @@ function addItemToInventory(inventory = [], itemToAdd) {
   ]
 }
 
-function createEquipmentInstance(defId) {
+function createEquipmentInstance(defId, overrides = {}) {
   return {
     instanceId: `eq_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
     defId,
     enhanceLevel: 0,
     equipped: false,
     bonusStats: {},
+    ...overrides,
   }
 }
 
@@ -1130,6 +1215,188 @@ function applyRewardPayload(player, reward) {
   }
 }
 
+function getVnDaySerial(input = Date.now()) {
+  return Math.floor(((Number(input) || 0) + VN_TZ_OFFSET_MS) / DAY_MS)
+}
+
+function getVnDayKey(input = Date.now()) {
+  const date = new Date((Number(input) || 0) + VN_TZ_OFFSET_MS)
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(date.getUTCDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function createDefaultWelfareState(now = Date.now()) {
+  return {
+    loginDayIndex: 0,
+    lastLoginClaimDaySerial: 0,
+    lastLoginClaimAtMs: 0,
+    missionDayKey: getVnDayKey(now),
+    missionProgress: Object.fromEntries(
+      DAILY_MISSION_DEFS.map((mission) => [mission.id, 0])
+    ),
+    missionClaims: {},
+    activityClaims: {},
+  }
+}
+
+function normalizeMissionProgress(rawProgress = {}) {
+  return Object.fromEntries(
+    DAILY_MISSION_DEFS.map((mission) => [
+      mission.id,
+      Math.max(
+        0,
+        Math.min(
+          mission.target,
+          Number(rawProgress?.[mission.id]) || 0
+        )
+      ),
+    ])
+  )
+}
+
+function normalizeBooleanLookup(rawLookup = {}) {
+  const source = rawLookup && typeof rawLookup === 'object' ? rawLookup : {}
+  return Object.fromEntries(
+    Object.entries(source).filter(([, value]) => value === true)
+  )
+}
+
+function getEffectiveLoginDayIndex(welfare, now = Date.now()) {
+  const normalized =
+    welfare && typeof welfare === 'object'
+      ? welfare
+      : createDefaultWelfareState(now)
+  const lastSerial = Number(normalized.lastLoginClaimDaySerial) || 0
+
+  if (!lastSerial) return Math.max(0, Number(normalized.loginDayIndex) || 0)
+
+  const dayDiff = getVnDaySerial(now) - lastSerial
+  if (dayDiff >= 2) return 0
+
+  return Math.max(0, Number(normalized.loginDayIndex) || 0)
+}
+
+function getNextLoginRewardDay(welfare, now = Date.now()) {
+  const index = getEffectiveLoginDayIndex(welfare, now)
+  return (index % DAILY_LOGIN_REWARDS.length) + 1
+}
+
+function normalizeWelfareState(rawWelfare, now = Date.now()) {
+  const source =
+    rawWelfare && typeof rawWelfare === 'object' ? rawWelfare : {}
+  const todayKey = getVnDayKey(now)
+  const missionDayKey = String(source.missionDayKey || '')
+  const missionProgress =
+    missionDayKey === todayKey
+      ? normalizeMissionProgress(source.missionProgress)
+      : normalizeMissionProgress({})
+  const missionClaims =
+    missionDayKey === todayKey
+      ? normalizeBooleanLookup(source.missionClaims)
+      : {}
+  const activityClaims =
+    missionDayKey === todayKey
+      ? normalizeBooleanLookup(source.activityClaims)
+      : {}
+
+  return {
+    loginDayIndex: Math.max(0, Math.min(7, Number(source.loginDayIndex) || 0)),
+    lastLoginClaimDaySerial: Math.max(
+      0,
+      Number(source.lastLoginClaimDaySerial) || 0
+    ),
+    lastLoginClaimAtMs: Math.max(0, Number(source.lastLoginClaimAtMs) || 0),
+    missionDayKey: todayKey,
+    missionProgress,
+    missionClaims,
+    activityClaims,
+  }
+}
+
+function applyWelfareProgress(rawWelfare, progressPatch, now = Date.now()) {
+  const welfare = normalizeWelfareState(rawWelfare, now)
+  const patch =
+    progressPatch && typeof progressPatch === 'object' ? progressPatch : {}
+  const nextProgress = { ...welfare.missionProgress }
+
+  for (const [missionId, amount] of Object.entries(patch)) {
+    const mission = DAILY_MISSION_MAP[missionId]
+    if (!mission) continue
+
+    const increment = Math.max(0, Number(amount) || 0)
+    if (increment <= 0) continue
+
+    nextProgress[missionId] = Math.min(
+      mission.target,
+      (Number(nextProgress[missionId]) || 0) + increment
+    )
+  }
+
+  return {
+    ...welfare,
+    missionProgress: nextProgress,
+  }
+}
+
+function getDailyActivityPoints(rawWelfare, now = Date.now()) {
+  const welfare = normalizeWelfareState(rawWelfare, now)
+  return DAILY_MISSION_DEFS.reduce((sum, mission) => {
+    const progress = Number(welfare.missionProgress?.[mission.id]) || 0
+    return sum + (progress >= mission.target ? mission.activityPoints : 0)
+  }, 0)
+}
+
+function getConsumableDisplayName(itemId) {
+  return CONSUMABLE_DEFS[itemId]?.name || itemId
+}
+
+function getEquipmentDisplayName(defId) {
+  return EQUIPMENT_DEFS[defId]?.name || defId
+}
+
+function describeRewardPayload(rawReward) {
+  const reward = normalizeRewardPayload(rawReward)
+  const parts = []
+
+  if ((Number(reward.spiritStones) || 0) > 0) {
+    parts.push(`${reward.spiritStones} linh thach`)
+  }
+
+  if ((Number(reward.herbs) || 0) > 0) {
+    parts.push(`${reward.herbs} duoc thao`)
+  }
+
+  for (const item of reward.consumables || []) {
+    parts.push(`${item.quantity} ${getConsumableDisplayName(item.itemId)}`)
+  }
+
+  for (const item of reward.equipments || []) {
+    parts.push(`${item.quantity} ${getEquipmentDisplayName(item.defId)}`)
+  }
+
+  for (const skillId of reward.skills || []) {
+    const skillName = COMBAT_SKILL_DEFS[skillId]?.name || skillId
+    parts.push(`ky nang ${skillName}`)
+  }
+
+  if ((Number(reward.baseStats?.maxHp) || 0) > 0) {
+    parts.push(`+${reward.baseStats.maxHp} Sinh luc goc`)
+  }
+  if ((Number(reward.baseStats?.maxMp) || 0) > 0) {
+    parts.push(`+${reward.baseStats.maxMp} Phap luc goc`)
+  }
+  if ((Number(reward.baseStats?.damage) || 0) > 0) {
+    parts.push(`+${reward.baseStats.damage} Cong goc`)
+  }
+  if ((Number(reward.baseStats?.defense) || 0) > 0) {
+    parts.push(`+${reward.baseStats.defense} Phong thu goc`)
+  }
+
+  return parts.length > 0 ? parts.join(', ') : 'qua thuong'
+}
+
 async function assertAdmin(uid) {
   const snap = await db.collection('users').doc(uid).get()
   const role = String(snap.data()?.role || 'player')
@@ -1517,6 +1784,278 @@ function buildPublicPlayerPayload(uid, player, profile) {
   }
 }
 
+function removeEquipmentInstanceFromInventory(inventory = [], instanceId) {
+  return inventory.filter((item) => item?.instanceId !== instanceId)
+}
+
+function buildNextSaveData(
+  currentSave,
+  { player, herbGarden, crafting, welfare, message, saveDataPatch, appendLog = true } = {}
+) {
+  const safeMessage =
+    typeof message === 'string' && message.trim() ? message : 'Khong co thay doi.'
+  const patch = saveDataPatch && typeof saveDataPatch === 'object' ? saveDataPatch : {}
+
+  return {
+    ...currentSave,
+    ...patch,
+    player: player || currentSave.player,
+    herbGarden: herbGarden || currentSave.herbGarden,
+    crafting:
+      crafting !== undefined
+        ? crafting
+        : currentSave.crafting,
+    welfare: normalizeWelfareState(
+      patch.welfare ?? welfare ?? currentSave.welfare,
+      Date.now()
+    ),
+    message: safeMessage,
+    logs: appendLog ? sanitizeLogs(currentSave.logs, safeMessage) : currentSave.logs,
+    combatLogs: sanitizeCombatLogs(patch.combatLogs ?? currentSave.combatLogs),
+  }
+}
+
+function persistUserState(transaction, userRef, existingData, payload) {
+  const profile = existingData?.profile || { displayName: '' }
+
+  transaction.set(
+    userRef,
+    {
+      email: existingData?.email || '',
+      role: existingData?.role || 'player',
+      profile,
+      saveData: payload,
+      updatedAt: FieldValue.serverTimestamp(),
+      lastActionAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  )
+
+  transaction.set(
+    db.collection('publicPlayers').doc(userRef.id),
+    buildPublicPlayerPayload(userRef.id, payload.player, profile),
+    { merge: true }
+  )
+}
+
+function normalizeMarketItem(item) {
+  if (!item?.instanceId || !item?.defId || !EQUIPMENT_DEFS[item.defId]) {
+    return null
+  }
+
+  return {
+    instanceId: String(item.instanceId),
+    defId: String(item.defId),
+    enhanceLevel: Number(item.enhanceLevel) || 0,
+    equipped: false,
+    bonusStats:
+      item.bonusStats && typeof item.bonusStats === 'object' ? item.bonusStats : {},
+  }
+}
+
+function buildMarketListingView(id, data, viewerUid = '') {
+  const item = normalizeMarketItem(data?.item)
+
+  return {
+    id,
+    sellerUid: String(data?.sellerUid || ''),
+    sellerName: normalizePlayerName(data?.sellerName || 'Vo Danh') || 'Vo Danh',
+    price: Math.max(1, Number(data?.price) || 0),
+    createdAtMs: Math.max(0, Number(data?.createdAtMs) || 0),
+    updatedAtMs: Math.max(0, Number(data?.updatedAtMs) || 0),
+    active: data?.active !== false,
+    item,
+    isOwner: !!viewerUid && String(data?.sellerUid || '') === viewerUid,
+  }
+}
+
+const WORLD_BOSS_DOC_ID = 'current'
+const WORLD_BOSS_NAME = 'Thiên Lang Yêu Vương'
+const WORLD_BOSS_MAX_HP = 100000
+const WORLD_BOSS_DAMAGE = 10
+const WORLD_BOSS_DEFENSE = 0
+const WORLD_BOSS_RESPAWN_MS = 60 * 60 * 1000
+const WORLD_BOSS_QUICK_REVIVE_COST = 2000
+const WORLD_BOSS_KILL_REWARD_STONES = 1000
+const WORLD_BOSS_KILL_REWARD_ITEM_ID = 'yeu_dan'
+const WORLD_BOSS_TOP_REWARDS = {
+  1: 100,
+  2: 50,
+  3: 20,
+}
+
+function sanitizeWorldBossLogs(logs) {
+  return Array.isArray(logs) ? logs.filter(Boolean).slice(-30) : []
+}
+
+function createDefaultWorldBossState() {
+  return {
+    cycleId: 1,
+    name: WORLD_BOSS_NAME,
+    status: 'alive',
+    hp: WORLD_BOSS_MAX_HP,
+    maxHp: WORLD_BOSS_MAX_HP,
+    damage: WORLD_BOSS_DAMAGE,
+    defense: WORLD_BOSS_DEFENSE,
+    rankings: {},
+    logs: ['Boss the gioi da xuat hien.'],
+    lastFinishedRankings: [],
+    lastFinishedCycleId: 0,
+    rankingRewardClaims: {},
+    lastKilledByUid: '',
+    lastKilledByName: '',
+    killedAtMs: null,
+    respawnAtMs: null,
+    quickReviveCost: WORLD_BOSS_QUICK_REVIVE_COST,
+  }
+}
+
+function normalizeWorldBossRankingMap(rankings) {
+  if (!rankings || typeof rankings !== 'object') return {}
+
+  return Object.fromEntries(
+    Object.entries(rankings)
+      .map(([uid, entry]) => [
+        uid,
+        {
+          uid,
+          name: normalizePlayerName(entry?.name || 'Vo Danh') || 'Vo Danh',
+          damage: Math.max(0, Number(entry?.damage) || 0),
+        },
+      ])
+      .filter(([, entry]) => entry.damage > 0)
+  )
+}
+
+function normalizeWorldBossState(data) {
+  const base = createDefaultWorldBossState()
+
+  return {
+    ...base,
+    ...(data || {}),
+    cycleId: Math.max(1, Number(data?.cycleId) || base.cycleId),
+    name: String(data?.name || base.name),
+    status: data?.status === 'cooldown' ? 'cooldown' : 'alive',
+    hp: Math.max(0, Number(data?.hp) || 0),
+    maxHp: Math.max(1, Number(data?.maxHp) || base.maxHp),
+    damage: Math.max(0, Number(data?.damage) || base.damage),
+    defense: Math.max(0, Number(data?.defense) || base.defense),
+    rankings: normalizeWorldBossRankingMap(data?.rankings),
+    logs: sanitizeWorldBossLogs(data?.logs),
+    lastFinishedRankings: Array.isArray(data?.lastFinishedRankings)
+      ? data.lastFinishedRankings
+      : [],
+    lastFinishedCycleId: Math.max(0, Number(data?.lastFinishedCycleId) || 0),
+    rankingRewardClaims:
+      data?.rankingRewardClaims && typeof data.rankingRewardClaims === 'object'
+        ? data.rankingRewardClaims
+        : {},
+    lastKilledByUid: String(data?.lastKilledByUid || ''),
+    lastKilledByName: normalizePlayerName(data?.lastKilledByName || ''),
+    killedAtMs: data?.killedAtMs ? Number(data.killedAtMs) : null,
+    respawnAtMs: data?.respawnAtMs ? Number(data.respawnAtMs) : null,
+    quickReviveCost: Math.max(
+      1,
+      Number(data?.quickReviveCost) || WORLD_BOSS_QUICK_REVIVE_COST
+    ),
+  }
+}
+
+function sortWorldBossRankings(rankings) {
+  const entries = Object.values(normalizeWorldBossRankingMap(rankings))
+  const totalDamage = entries.reduce((sum, entry) => sum + (Number(entry.damage) || 0), 0)
+
+  return entries
+    .sort((left, right) => {
+      const diff = (Number(right.damage) || 0) - (Number(left.damage) || 0)
+      if (diff !== 0) return diff
+      return String(left.name || '').localeCompare(String(right.name || ''), 'vi')
+    })
+    .map((entry, index) => ({
+      ...entry,
+      rank: index + 1,
+      share:
+        totalDamage > 0
+          ? Number((((Number(entry.damage) || 0) / totalDamage) * 100).toFixed(1))
+          : 0,
+    }))
+}
+
+function buildWorldBossStatePayload(data) {
+  const normalized = normalizeWorldBossState(data)
+
+  return {
+    ...normalized,
+    rankings: sortWorldBossRankings(normalized.rankings),
+    logs: sanitizeWorldBossLogs(normalized.logs),
+    lastFinishedRankings: Array.isArray(normalized.lastFinishedRankings)
+      ? normalized.lastFinishedRankings
+      : [],
+  }
+}
+
+function createAliveWorldBossCycle(previousState) {
+  const previous = normalizeWorldBossState(previousState)
+
+  return {
+    cycleId: previous.status === 'alive' ? previous.cycleId : previous.cycleId + 1,
+    name: WORLD_BOSS_NAME,
+    status: 'alive',
+    hp: WORLD_BOSS_MAX_HP,
+    maxHp: WORLD_BOSS_MAX_HP,
+    damage: WORLD_BOSS_DAMAGE,
+    defense: WORLD_BOSS_DEFENSE,
+    rankings: {},
+    logs: ['Boss the gioi da hoi sinh, chien truong mo lai.'],
+    lastFinishedRankings: previous.lastFinishedRankings || [],
+    lastFinishedCycleId: previous.lastFinishedCycleId || 0,
+    rankingRewardClaims:
+      previous.rankingRewardClaims && typeof previous.rankingRewardClaims === 'object'
+        ? previous.rankingRewardClaims
+        : {},
+    lastKilledByUid: previous.lastKilledByUid || '',
+    lastKilledByName: previous.lastKilledByName || '',
+    killedAtMs: null,
+    respawnAtMs: null,
+    quickReviveCost: WORLD_BOSS_QUICK_REVIVE_COST,
+  }
+}
+
+function ensureWorldBossActive(state, now = Date.now()) {
+  const normalized = normalizeWorldBossState(state)
+
+  if (
+    normalized.status === 'cooldown' &&
+    Number(normalized.respawnAtMs) > 0 &&
+    now >= Number(normalized.respawnAtMs)
+  ) {
+    return createAliveWorldBossCycle(normalized)
+  }
+
+  return normalized
+}
+
+function getWorldBossRankingRewardInfo(state, uid) {
+  if (!uid) return { claimable: false, claimed: false, rank: 0, reward: 0 }
+
+  const normalized = normalizeWorldBossState(state)
+  const rankings = Array.isArray(normalized.lastFinishedRankings)
+    ? normalized.lastFinishedRankings
+    : []
+  const entry = rankings.find((item) => item.uid === uid)
+  const rank = Number(entry?.rank) || 0
+  const reward = WORLD_BOSS_TOP_REWARDS[rank] || 0
+  const claimedCycle = Number(normalized.rankingRewardClaims?.[uid]?.cycleId) || 0
+  const claimed = claimedCycle === Number(normalized.lastFinishedCycleId || 0) && reward > 0
+
+  return {
+    claimable: reward > 0 && !claimed,
+    claimed,
+    rank,
+    reward,
+  }
+}
+
 function toNumber(value, fallback = 0) {
   return Number.isFinite(value) ? value : fallback
 }
@@ -1734,7 +2273,77 @@ function createRandomFloor1Monster() {
   return createMonsterByStage(stage)
 }
 
+const DUNGEON_FLOOR_LANG_VUONG = 3
+const LANG_VUONG_ENTRY_COST = 100
+
+function createWolfFangMonster() {
+  return {
+    id: `wolf_fang_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    type: 'monster',
+    name: 'Lang Nha',
+    realm: REALM_MORTAL,
+    stage: 1,
+    hp: 100,
+    maxHp: 100,
+    damage: 10,
+    defense: 0,
+    rewardExp: 0,
+    rewardSpiritStones: 5,
+    damageType: 'physical',
+    critChance: 0,
+    critDamage: 1.5,
+    dodgeChance: 0,
+    lifesteal: 0,
+    damageReduction: 0,
+    shield: 0,
+  }
+}
+
+function createLangVuongBoss() {
+  return {
+    id: `lang_vuong_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    type: 'boss',
+    name: 'Lang Vuong',
+    realm: REALM_MORTAL,
+    stage: 10,
+    hp: 3000,
+    maxHp: 3000,
+    damage: 100,
+    defense: 0,
+    rewardExp: 0,
+    rewardSpiritStones: 100,
+    damageType: 'physical',
+    critChance: 0.08,
+    critDamage: 1.7,
+    dodgeChance: 0.02,
+    lifesteal: 0,
+    damageReduction: 0,
+    shield: 0,
+    lockedEncounter: true,
+  }
+}
+
+function rollLangBongDamage() {
+  return Math.floor(Math.random() * 21) + 30
+}
+
+function canLeaveDungeonEncounter(enemy) {
+  return !enemy?.lockedEncounter
+}
+
+function getDungeonEntryCost(floor) {
+  return floor === DUNGEON_FLOOR_LANG_VUONG ? LANG_VUONG_ENTRY_COST : 0
+}
+
+function getDungeonFloorLabel(floor) {
+  return floor === DUNGEON_FLOOR_LANG_VUONG ? 'Bi Canh Lang Vuong' : `Bi Canh tang ${floor}`
+}
+
 function createBoss(floor = 1) {
+  if (floor === DUNGEON_FLOOR_LANG_VUONG) {
+    return createLangVuongBoss()
+  }
+
   if (floor === 2) {
     return {
       id: `boss_floor_2_${Date.now()}`,
@@ -1779,6 +2388,24 @@ function createBoss(floor = 1) {
 }
 
 function getBossDrop(floor = 1) {
+  if (floor === DUNGEON_FLOOR_LANG_VUONG) {
+    const damage = rollLangBongDamage()
+
+    return {
+      herbs: 0,
+      spiritStones: 100,
+      equipments: [
+        {
+          defId: 'lang_bong',
+          bonusStats: {
+            damage,
+          },
+        },
+      ],
+      message: `Lang Vuong roi 100 linh thach va Lang Bong +${damage} sat thuong.`,
+    }
+  }
+
   const roll = Math.random()
 
   if (floor === 1) {
@@ -1786,6 +2413,7 @@ function getBossDrop(floor = 1) {
       return {
         herbs: 1,
         spiritStones: 0,
+        equipments: [],
         message: 'Boss rơi 1 dược thảo.',
       }
     }
@@ -1793,6 +2421,7 @@ function getBossDrop(floor = 1) {
     return {
       herbs: 0,
       spiritStones: 10,
+      equipments: [],
       message: 'Boss rơi 10 linh thạch.',
     }
   }
@@ -1801,6 +2430,7 @@ function getBossDrop(floor = 1) {
     return {
       herbs: 1,
       spiritStones: 0,
+      equipments: [],
       message: 'Boss tầng 2 rơi 1 dược thảo.',
     }
   }
@@ -1808,6 +2438,7 @@ function getBossDrop(floor = 1) {
   return {
     herbs: 0,
     spiritStones: 10,
+    equipments: [],
     message: 'Boss tầng 2 rơi 10 linh thạch.',
   }
 }
@@ -1818,6 +2449,42 @@ function spawnFloor1Enemy(nextKillCount) {
   }
 
   return createRandomFloor1Monster()
+}
+
+function getDungeonMonsterReward(floor, enemy) {
+  if (floor === DUNGEON_FLOOR_LANG_VUONG) {
+    return {
+      exp: 0,
+      spiritStones: 5,
+      message: `Ban danh bai ${enemy?.name || 'Lang Nha'}, nhan 5 linh thach.`,
+    }
+  }
+
+  return {
+    exp: 10,
+    spiritStones: 1,
+    message: `Ban danh bai ${enemy?.name || 'quai vat'}, nhan 10 EXP va 1 linh thach.`,
+  }
+}
+
+function createDungeonEnemy(floor, nextKillCount = 0) {
+  if (floor === 1) {
+    if (nextKillCount > 0 && nextKillCount % 10 === 0) {
+      return createBoss(1)
+    }
+
+    return createRandomFloor1Monster()
+  }
+
+  if (floor === 2) {
+    return createBoss(2)
+  }
+
+  if (floor === DUNGEON_FLOOR_LANG_VUONG) {
+    return Math.random() < 0.1 ? createLangVuongBoss() : createWolfFangMonster()
+  }
+
+  return null
 }
 
 function normalizeSaveData(rawSaveData) {
@@ -1847,6 +2514,7 @@ function normalizeSaveData(rawSaveData) {
     killCount: Number(saveData.killCount) || 0,
     dungeonCooldownUntil: saveData.dungeonCooldownUntil ?? null,
     combatLogs: sanitizeCombatLogs(saveData.combatLogs),
+    welfare: normalizeWelfareState(saveData.welfare),
   }
 }
 
@@ -1855,6 +2523,7 @@ async function runPlayerAction(uid, resolver) {
   const publicRef = db.collection('publicPlayers').doc(uid)
 
   const result = await db.runTransaction(async (transaction) => {
+    const now = Date.now()
     const snap = await transaction.get(ref)
     const data = snap.exists ? snap.data() : {}
     const normalizedSave = normalizeSaveData(data?.saveData)
@@ -1863,6 +2532,7 @@ async function runPlayerAction(uid, resolver) {
         transaction,
         userRef: ref,
         publicRef,
+        now,
       })
     )
 
@@ -1870,7 +2540,10 @@ async function runPlayerAction(uid, resolver) {
       typeof resolved?.message === 'string' && resolved.message.trim()
         ? resolved.message
         : 'Không có thay đổi.'
-    const safeLogs = sanitizeLogs(normalizedSave.logs, safeMessage)
+    const safeLogs =
+      resolved?.appendLog === false
+        ? normalizedSave.logs
+        : sanitizeLogs(normalizedSave.logs, safeMessage)
     const saveDataPatch =
       resolved?.saveDataPatch && typeof resolved.saveDataPatch === 'object'
         ? resolved.saveDataPatch
@@ -1882,6 +2555,9 @@ async function runPlayerAction(uid, resolver) {
             ...resolved.profilePatch,
           }
         : data?.profile || { displayName: '' }
+    const nextWelfare = Object.prototype.hasOwnProperty.call(resolved || {}, 'welfare')
+      ? normalizeWelfareState(resolved?.welfare, now)
+      : applyWelfareProgress(normalizedSave.welfare, resolved?.welfareProgress, now)
 
     const payload = {
       ...normalizedSave,
@@ -1896,6 +2572,10 @@ async function runPlayerAction(uid, resolver) {
       logs: safeLogs,
       combatLogs: sanitizeCombatLogs(
         saveDataPatch.combatLogs ?? normalizedSave.combatLogs
+      ),
+      welfare: normalizeWelfareState(
+        saveDataPatch.welfare ?? nextWelfare,
+        now
       ),
     }
 
@@ -1918,27 +2598,6 @@ async function runPlayerAction(uid, resolver) {
       { merge: true }
     )
 
-    const finalName = normalizePlayerName(payload.player?.name)
-    const finalNameKey = normalizePlayerNameKey(finalName)
-
-    if (finalName && finalNameKey) {
-      const nameRef = db.collection('characterNames').doc(finalNameKey)
-      const nameSnap = await transaction.get(nameRef)
-      const reservedUid = String(nameSnap.data()?.uid || '')
-
-      if (!nameSnap.exists || reservedUid === uid) {
-        transaction.set(
-          nameRef,
-          {
-            uid,
-            name: finalName,
-            updatedAt: FieldValue.serverTimestamp(),
-          },
-          { merge: true }
-        )
-      }
-    }
-
     return {
       ok: Boolean(resolved?.ok),
       message: safeMessage,
@@ -1951,6 +2610,7 @@ async function runPlayerAction(uid, resolver) {
       killCount: payload.killCount,
       dungeonCooldownUntil: payload.dungeonCooldownUntil,
       combatLogs: payload.combatLogs,
+      welfare: payload.welfare,
     }
   })
 
@@ -1976,6 +2636,7 @@ export const cultivateAction = onCall(
         },
         herbGarden: saveData.herbGarden,
         crafting: saveData.crafting,
+        welfareProgress: { cultivate_10: 1 },
         message: 'Bạn tu luyện và nhận 1 EXP.',
       }))
     } catch (error) {
@@ -2066,6 +2727,16 @@ export const setInitialNameAction = onCall(
             message: 'Ten nhan vat nay da co nguoi su dung.',
           }
         }
+
+        context.transaction.set(
+          nameRef,
+          {
+            uid,
+            name: normalizedName,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        )
 
         return {
           ok: true,
@@ -2317,6 +2988,1213 @@ export const purchaseShopItemAction = onCall(
   }
 )
 
+export const listMarketListingsAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid || ''
+
+    try {
+      const listingsSnap = await db
+        .collection('marketListings')
+        .orderBy('createdAtMs', 'desc')
+        .limit(100)
+        .get()
+
+      const listings = listingsSnap.docs
+        .map((docSnap) => buildMarketListingView(docSnap.id, docSnap.data(), uid))
+        .filter((listing) => listing.active && listing.item)
+
+      if (!uid) {
+        return {
+          ok: true,
+          listings,
+        }
+      }
+
+      const userSnap = await db.collection('users').doc(uid).get()
+      const userData = userSnap.exists ? userSnap.data() : {}
+      const saveData = normalizeSaveData(userData?.saveData)
+
+      return {
+        ok: true,
+        listings,
+        player: saveData.player,
+        herbGarden: saveData.herbGarden,
+        crafting: saveData.crafting,
+      }
+    } catch (error) {
+      console.error('listMarketListingsAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi tai danh sach cho giao dich.'
+      )
+    }
+  }
+)
+
+export const createMarketListingAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const instanceId = String(request.data?.instanceId || '').trim()
+    const price = Math.max(1, Number(request.data?.price) || 0)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!instanceId) {
+      throw new HttpsError('invalid-argument', 'Vat pham khong hop le.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData, context) => {
+        const inventoryItem = getInventoryItemByInstanceId(
+          saveData.player?.inventory || [],
+          instanceId
+        )
+
+        if (!inventoryItem || !inventoryItem.defId || !EQUIPMENT_DEFS[inventoryItem.defId]) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Chi co the dang ban trang bi trong tui do.',
+          }
+        }
+
+        if (inventoryItem.equipped) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Hay thao trang bi truoc khi dang ban.',
+          }
+        }
+
+        const normalizedItem = normalizeMarketItem(inventoryItem)
+        if (!normalizedItem) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Vat pham nay khong the dua len cho.',
+          }
+        }
+
+        const listingRef = db.collection('marketListings').doc()
+        const now = Date.now()
+        const sellerName =
+          normalizePlayerName(saveData.player?.name) ||
+          normalizePlayerName(context?.profilePatch?.displayName) ||
+          'Vo Danh'
+
+        context.transaction.set(
+          listingRef,
+          {
+            sellerUid: uid,
+            sellerName,
+            price,
+            active: true,
+            status: 'active',
+            item: normalizedItem,
+            createdAtMs: now,
+            updatedAtMs: now,
+          },
+          { merge: true }
+        )
+
+        return {
+          ok: true,
+          player: {
+            ...saveData.player,
+            inventory: removeEquipmentInstanceFromInventory(
+              saveData.player?.inventory || [],
+              instanceId
+            ),
+          },
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: `Da dang ban ${EQUIPMENT_DEFS[inventoryItem.defId].name} voi gia ${price} linh thach.`,
+        }
+      })
+    } catch (error) {
+      console.error('createMarketListingAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi dang ban vat pham.'
+      )
+    }
+  }
+)
+
+export const cancelMarketListingAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const listingId = String(request.data?.listingId || '').trim()
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!listingId) {
+      throw new HttpsError('invalid-argument', 'Gian hang khong hop le.')
+    }
+
+    try {
+      return await runPlayerAction(uid, async (saveData, context) => {
+        const listingRef = db.collection('marketListings').doc(listingId)
+        const listingSnap = await context.transaction.get(listingRef)
+
+        if (!listingSnap.exists) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Khong tim thay gian hang nay.',
+          }
+        }
+
+        const listingData = listingSnap.data() || {}
+        const listing = buildMarketListingView(listingSnap.id, listingData, uid)
+
+        if (!listing.active) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Vat pham nay da duoc go khoi cho.',
+          }
+        }
+
+        if (listing.sellerUid !== uid) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Ban khong so huu gian hang nay.',
+          }
+        }
+
+        context.transaction.set(
+          listingRef,
+          {
+            active: false,
+            status: 'cancelled',
+            updatedAtMs: Date.now(),
+          },
+          { merge: true }
+        )
+
+        return {
+          ok: true,
+          player: {
+            ...saveData.player,
+            inventory: [...(saveData.player?.inventory || []), listing.item],
+          },
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message: `Da go ${EQUIPMENT_DEFS[listing.item.defId]?.name || 'trang bi'} khoi cho giao dich.`,
+        }
+      })
+    } catch (error) {
+      console.error('cancelMarketListingAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi go vat pham khoi cho.'
+      )
+    }
+  }
+)
+
+export const buyMarketListingAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const listingId = String(request.data?.listingId || '').trim()
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!listingId) {
+      throw new HttpsError('invalid-argument', 'Gian hang khong hop le.')
+    }
+
+    try {
+      const result = await db.runTransaction(async (transaction) => {
+        const buyerRef = db.collection('users').doc(uid)
+        const listingRef = db.collection('marketListings').doc(listingId)
+
+        const [buyerSnap, listingSnap] = await Promise.all([
+          transaction.get(buyerRef),
+          transaction.get(listingRef),
+        ])
+
+        const buyerData = buyerSnap.exists ? buyerSnap.data() : {}
+        const buyerSave = normalizeSaveData(buyerData?.saveData)
+
+        if (!listingSnap.exists) {
+          return {
+            ok: false,
+            player: buyerSave.player,
+            herbGarden: buyerSave.herbGarden,
+            crafting: buyerSave.crafting,
+            message: 'Khong tim thay gian hang nay.',
+          }
+        }
+
+        const listingData = listingSnap.data() || {}
+        const listing = buildMarketListingView(listingSnap.id, listingData, uid)
+
+        if (!listing.active || !listing.item) {
+          return {
+            ok: false,
+            player: buyerSave.player,
+            herbGarden: buyerSave.herbGarden,
+            crafting: buyerSave.crafting,
+            message: 'Vat pham nay khong con trong cho.',
+          }
+        }
+
+        if (listing.sellerUid === uid) {
+          return {
+            ok: false,
+            player: buyerSave.player,
+            herbGarden: buyerSave.herbGarden,
+            crafting: buyerSave.crafting,
+            message: 'Ban khong the tu mua vat pham cua minh.',
+          }
+        }
+
+        if ((Number(buyerSave.player?.spiritStones) || 0) < listing.price) {
+          return {
+            ok: false,
+            player: buyerSave.player,
+            herbGarden: buyerSave.herbGarden,
+            crafting: buyerSave.crafting,
+            message: `Khong du ${listing.price} linh thach de mua vat pham nay.`,
+          }
+        }
+
+        const sellerRef = db.collection('users').doc(listing.sellerUid)
+        const sellerSnap = await transaction.get(sellerRef)
+        const sellerData = sellerSnap.exists ? sellerSnap.data() : null
+
+        if (!sellerData) {
+          return {
+            ok: false,
+            player: buyerSave.player,
+            herbGarden: buyerSave.herbGarden,
+            crafting: buyerSave.crafting,
+            message: 'Nguoi ban khong con ton tai.',
+          }
+        }
+
+        const sellerSave = normalizeSaveData(sellerData?.saveData)
+        const buyerPlayer = {
+          ...buyerSave.player,
+          spiritStones: Math.max(
+            0,
+            (Number(buyerSave.player?.spiritStones) || 0) - listing.price
+          ),
+          inventory: [...(buyerSave.player?.inventory || []), listing.item],
+        }
+
+        const sellerPlayer = {
+          ...sellerSave.player,
+          spiritStones:
+            (Number(sellerSave.player?.spiritStones) || 0) + listing.price,
+        }
+
+        const buyerPayload = buildNextSaveData(buyerSave, {
+          player: buyerPlayer,
+          herbGarden: buyerSave.herbGarden,
+          crafting: buyerSave.crafting,
+          message: `Da mua ${EQUIPMENT_DEFS[listing.item.defId]?.name || 'trang bi'} voi gia ${listing.price} linh thach.`,
+        })
+
+        const sellerPayload = buildNextSaveData(sellerSave, {
+          player: sellerPlayer,
+          herbGarden: sellerSave.herbGarden,
+          crafting: sellerSave.crafting,
+          message: `Vat pham ${EQUIPMENT_DEFS[listing.item.defId]?.name || 'trang bi'} da duoc ban thanh cong.`,
+        })
+
+        persistUserState(transaction, buyerRef, buyerData, buyerPayload)
+        persistUserState(transaction, sellerRef, sellerData, sellerPayload)
+
+        transaction.set(
+          listingRef,
+          {
+            active: false,
+            status: 'sold',
+            buyerUid: uid,
+            updatedAtMs: Date.now(),
+          },
+          { merge: true }
+        )
+
+        return {
+          ok: true,
+          player: buyerPayload.player,
+          herbGarden: buyerPayload.herbGarden,
+          crafting: buyerPayload.crafting,
+          message: buyerPayload.message,
+        }
+      })
+
+      return result
+    } catch (error) {
+      console.error('buyMarketListingAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi mua vat pham trong cho.'
+      )
+    }
+  }
+)
+
+export const fetchWorldBossAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid || ''
+
+    try {
+      const bossRef = db.collection('worldBoss').doc(WORLD_BOSS_DOC_ID)
+      const bossState = await db.runTransaction(async (transaction) => {
+        const snap = await transaction.get(bossRef)
+        const nextState = ensureWorldBossActive(snap.exists ? snap.data() : null, Date.now())
+
+        transaction.set(bossRef, nextState, { merge: true })
+        return nextState
+      })
+
+      return {
+        ok: true,
+        viewerUid: uid,
+        boss: buildWorldBossStatePayload(bossState),
+        rankings: sortWorldBossRankings(bossState.rankings),
+        lastFinishedRankings: Array.isArray(bossState.lastFinishedRankings)
+          ? bossState.lastFinishedRankings
+          : [],
+        logs: sanitizeWorldBossLogs(bossState.logs),
+        rankingReward: getWorldBossRankingRewardInfo(bossState, uid),
+      }
+    } catch (error) {
+      console.error('fetchWorldBossAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi tai Boss the gioi.'
+      )
+    }
+  }
+)
+
+export const attackWorldBossAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const skillId = String(request.data?.skillId || '').trim() || null
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      const result = await db.runTransaction(async (transaction) => {
+        const now = Date.now()
+        const userRef = db.collection('users').doc(uid)
+        const publicRef = db.collection('publicPlayers').doc(uid)
+        const bossRef = db.collection('worldBoss').doc(WORLD_BOSS_DOC_ID)
+
+        const [userSnap, bossSnap] = await Promise.all([
+          transaction.get(userRef),
+          transaction.get(bossRef),
+        ])
+
+        const userData = userSnap.exists ? userSnap.data() : {}
+        const saveData = normalizeSaveData(userData?.saveData)
+        const profile = userData?.profile || { displayName: '' }
+        const bossState = ensureWorldBossActive(bossSnap.exists ? bossSnap.data() : null, now)
+        const currentWelfare = normalizeWelfareState(saveData.welfare, now)
+
+        if (bossState.status !== 'alive') {
+          transaction.set(bossRef, bossState, { merge: true })
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            viewerUid: uid,
+            boss: buildWorldBossStatePayload(bossState),
+            rankings: sortWorldBossRankings(bossState.rankings),
+            lastFinishedRankings: Array.isArray(bossState.lastFinishedRankings)
+              ? bossState.lastFinishedRankings
+              : [],
+            message: 'Boss dang hoi sinh, hay cho boss xuat hien tro lai.',
+          }
+        }
+
+        if ((Number(saveData.player?.hp) || 0) <= 0) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            viewerUid: uid,
+            boss: buildWorldBossStatePayload(bossState),
+            rankings: sortWorldBossRankings(bossState.rankings),
+            lastFinishedRankings: Array.isArray(bossState.lastFinishedRankings)
+              ? bossState.lastFinishedRankings
+              : [],
+            message: 'Ban dang trong thuong, hay hoi Sinh luc truoc khi tan cong boss.',
+          }
+        }
+
+        const basePlayer = advanceSkillCooldowns(saveData.player)
+        const playerEntity = buildCombatEntityFromPlayer(basePlayer, getFinalStats(basePlayer))
+        const bossEntity = buildCombatEntityFromEnemy({
+          id: `world_boss_${bossState.cycleId}`,
+          name: bossState.name,
+          type: 'boss',
+          hp: bossState.hp,
+          maxHp: bossState.maxHp,
+          damage: bossState.damage,
+          defense: bossState.defense,
+        })
+        let turnPlayer = basePlayer
+        let roundResult
+
+        if (skillId) {
+          const skillUse = consumeCombatSkill(basePlayer, skillId)
+
+          if (!skillUse.ok) {
+            return {
+              ok: false,
+              player: saveData.player,
+              herbGarden: saveData.herbGarden,
+              crafting: saveData.crafting,
+              viewerUid: uid,
+              boss: buildWorldBossStatePayload(bossState),
+              rankings: sortWorldBossRankings(bossState.rankings),
+              lastFinishedRankings: Array.isArray(bossState.lastFinishedRankings)
+                ? bossState.lastFinishedRankings
+                : [],
+              logs: sanitizeWorldBossLogs([...bossState.logs, skillUse.message]),
+              rankingReward: getWorldBossRankingRewardInfo(bossState, uid),
+              message: skillUse.message,
+            }
+          }
+
+          turnPlayer = skillUse.player
+          const boostedPlayerEntity = buildCombatEntityFromPlayer(
+            turnPlayer,
+            getFinalStats(turnPlayer)
+          )
+          const playerAttack = resolveSkillAttack(
+            boostedPlayerEntity,
+            bossEntity,
+            skillUse.def.damageMultiplier
+          )
+          const roundLogs = [
+            `${turnPlayer.name || 'Ban'} thi trien ${skillUse.def.name}, tieu hao ${skillUse.def.manaCost} Phap luc.`,
+            playerAttack.log,
+          ]
+
+          if (playerAttack.isDefenderDead) {
+            roundResult = {
+              playerDamage: playerAttack.damage,
+              nextPlayer: {
+                ...turnPlayer,
+                hp: turnPlayer.hp,
+                mp: turnPlayer.mp,
+              },
+              nextBossHp: playerAttack.defenderNext.hp,
+              playerHpAfter: turnPlayer.hp,
+              logs: roundLogs,
+              bossCounterDamage: 0,
+              bossDied: true,
+            }
+          } else {
+            const bossAttack = resolveAttack(playerAttack.defenderNext, {
+              ...boostedPlayerEntity,
+              hp: turnPlayer.hp,
+              mp: turnPlayer.mp,
+            })
+
+            roundResult = {
+              playerDamage: playerAttack.damage,
+              nextPlayer: {
+                ...turnPlayer,
+                hp: bossAttack.defenderNext.hp,
+                mp: turnPlayer.mp,
+              },
+              nextBossHp: bossAttack.attackerNext.hp,
+              playerHpAfter: bossAttack.defenderNext.hp,
+              logs: [...roundLogs, bossAttack.log],
+              bossCounterDamage: bossAttack.damage,
+              bossDied: false,
+            }
+          }
+        } else {
+          const baseRound = resolveCombatRound(playerEntity, bossEntity)
+          roundResult = {
+            playerDamage: baseRound.playerAttack?.damage || 0,
+            nextPlayer: {
+              ...turnPlayer,
+              hp: baseRound.nextPlayer.hp,
+              mp: turnPlayer.mp,
+            },
+            nextBossHp: baseRound.nextEnemy.hp,
+            playerHpAfter: baseRound.nextPlayer.hp,
+            logs: baseRound.logs,
+            bossCounterDamage: baseRound.enemyAttack?.damage || 0,
+            bossDied: baseRound.isEnemyDead,
+          }
+        }
+
+        const nextRankings = {
+          ...normalizeWorldBossRankingMap(bossState.rankings),
+          [uid]: {
+            uid,
+            name:
+              normalizePlayerName(turnPlayer?.name || profile?.displayName || 'Vo Danh') ||
+              'Vo Danh',
+            damage:
+              (Number(bossState.rankings?.[uid]?.damage) || 0) +
+              (Number(roundResult.playerDamage) || 0),
+          },
+        }
+
+        let nextPlayer = roundResult.nextPlayer
+        let nextBossState = {
+          ...bossState,
+          hp: Math.max(0, Number(roundResult.nextBossHp) || 0),
+          rankings: nextRankings,
+        }
+        const nextWelfare = applyWelfareProgress(
+          currentWelfare,
+          { world_boss_attack_3: 1 },
+          now
+        )
+        let logs = sanitizeWorldBossLogs([
+          ...bossState.logs,
+          ...roundResult.logs,
+        ])
+        let message = `Ban gay ${roundResult.playerDamage} sat thuong len ${bossState.name}.`
+
+        if (roundResult.bossDied) {
+          const finalRankings = sortWorldBossRankings(nextRankings)
+          nextPlayer = {
+            ...nextPlayer,
+            spiritStones:
+              (Number(nextPlayer?.spiritStones) || 0) + WORLD_BOSS_KILL_REWARD_STONES,
+            inventory: addItemToInventory(nextPlayer?.inventory || [], {
+              id: WORLD_BOSS_KILL_REWARD_ITEM_ID,
+              quantity: 1,
+            }),
+          }
+
+          nextBossState = {
+            ...nextBossState,
+            status: 'cooldown',
+            hp: 0,
+            killedAtMs: now,
+            respawnAtMs: now + WORLD_BOSS_RESPAWN_MS,
+            lastKilledByUid: uid,
+            lastKilledByName:
+              normalizePlayerName(turnPlayer?.name || profile?.displayName || 'Vo Danh') ||
+              'Vo Danh',
+            lastFinishedCycleId: Number(bossState.cycleId) || 1,
+            lastFinishedRankings: finalRankings,
+            rankingRewardClaims: {},
+          }
+          logs = sanitizeWorldBossLogs([
+            ...logs,
+            `${turnPlayer.name || 'Ban'} da ket lieu ${bossState.name}.`,
+          ])
+          message = `Ban ket lieu ${bossState.name}, nhan ${WORLD_BOSS_KILL_REWARD_STONES} linh thach va 1 Yeu Dan.`
+        } else {
+          message += ` ${bossState.name} phan kich ${roundResult.bossCounterDamage} sat thuong.`
+        }
+
+        const payload = buildNextSaveData(saveData, {
+          player: nextPlayer,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          welfare: nextWelfare,
+          message,
+        })
+
+        nextBossState = {
+          ...nextBossState,
+          logs,
+        }
+
+        transaction.set(bossRef, nextBossState, { merge: true })
+        transaction.set(
+          userRef,
+          {
+            email: userData?.email || '',
+            role: userData?.role || 'player',
+            profile,
+            saveData: payload,
+            updatedAt: FieldValue.serverTimestamp(),
+            lastActionAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        )
+        transaction.set(
+          publicRef,
+          buildPublicPlayerPayload(uid, payload.player, profile),
+          { merge: true }
+        )
+
+        return {
+          ok: true,
+          player: payload.player,
+          herbGarden: payload.herbGarden,
+          crafting: payload.crafting,
+          viewerUid: uid,
+          boss: buildWorldBossStatePayload(nextBossState),
+          rankings: sortWorldBossRankings(nextBossState.rankings),
+          lastFinishedRankings: Array.isArray(nextBossState.lastFinishedRankings)
+            ? nextBossState.lastFinishedRankings
+            : [],
+          logs,
+          rankingReward: getWorldBossRankingRewardInfo(nextBossState, uid),
+          welfare: payload.welfare,
+          message,
+        }
+      })
+
+      return result
+    } catch (error) {
+      console.error('attackWorldBossAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi tan cong Boss the gioi.'
+      )
+    }
+  }
+)
+
+export const quickReviveWorldBossAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      const result = await db.runTransaction(async (transaction) => {
+        const userRef = db.collection('users').doc(uid)
+        const publicRef = db.collection('publicPlayers').doc(uid)
+        const bossRef = db.collection('worldBoss').doc(WORLD_BOSS_DOC_ID)
+
+        const [userSnap, bossSnap] = await Promise.all([
+          transaction.get(userRef),
+          transaction.get(bossRef),
+        ])
+
+        const userData = userSnap.exists ? userSnap.data() : {}
+        const saveData = normalizeSaveData(userData?.saveData)
+        const profile = userData?.profile || { displayName: '' }
+        const bossState = ensureWorldBossActive(bossSnap.exists ? bossSnap.data() : null, Date.now())
+
+        if (bossState.status === 'alive') {
+          transaction.set(bossRef, bossState, { merge: true })
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            viewerUid: uid,
+            boss: buildWorldBossStatePayload(bossState),
+            rankings: sortWorldBossRankings(bossState.rankings),
+            lastFinishedRankings: Array.isArray(bossState.lastFinishedRankings)
+              ? bossState.lastFinishedRankings
+              : [],
+            logs: sanitizeWorldBossLogs(bossState.logs),
+            rankingReward: getWorldBossRankingRewardInfo(bossState, uid),
+            message: 'Boss dang con song, khong can hoi sinh nhanh.',
+          }
+        }
+
+        if ((Number(saveData.player?.spiritStones) || 0) < WORLD_BOSS_QUICK_REVIVE_COST) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            viewerUid: uid,
+            boss: buildWorldBossStatePayload(bossState),
+            rankings: sortWorldBossRankings(bossState.rankings),
+            lastFinishedRankings: Array.isArray(bossState.lastFinishedRankings)
+              ? bossState.lastFinishedRankings
+              : [],
+            logs: sanitizeWorldBossLogs(bossState.logs),
+            rankingReward: getWorldBossRankingRewardInfo(bossState, uid),
+            message: `Khong du ${WORLD_BOSS_QUICK_REVIVE_COST} linh thach de hoi sinh nhanh boss.`,
+          }
+        }
+
+        const nextBossState = {
+          ...createAliveWorldBossCycle(bossState),
+          cycleId: Math.max(1, Number(bossState.cycleId) || 1) + 1,
+        }
+        const nextPlayer = {
+          ...saveData.player,
+          spiritStones:
+            (Number(saveData.player?.spiritStones) || 0) - WORLD_BOSS_QUICK_REVIVE_COST,
+        }
+        const message = `Ban da tieu hao ${WORLD_BOSS_QUICK_REVIVE_COST} linh thach de hoi sinh nhanh ${WORLD_BOSS_NAME}.`
+        const payload = buildNextSaveData(saveData, {
+          player: nextPlayer,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message,
+        })
+
+        transaction.set(bossRef, nextBossState, { merge: true })
+        transaction.set(
+          userRef,
+          {
+            email: userData?.email || '',
+            role: userData?.role || 'player',
+            profile,
+            saveData: payload,
+            updatedAt: FieldValue.serverTimestamp(),
+            lastActionAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        )
+        transaction.set(
+          publicRef,
+          buildPublicPlayerPayload(uid, payload.player, profile),
+          { merge: true }
+        )
+
+        return {
+          ok: true,
+          player: payload.player,
+          herbGarden: payload.herbGarden,
+          crafting: payload.crafting,
+          viewerUid: uid,
+          boss: buildWorldBossStatePayload(nextBossState),
+          rankings: sortWorldBossRankings(nextBossState.rankings),
+          lastFinishedRankings: Array.isArray(nextBossState.lastFinishedRankings)
+            ? nextBossState.lastFinishedRankings
+            : [],
+          logs: sanitizeWorldBossLogs(nextBossState.logs),
+          rankingReward: getWorldBossRankingRewardInfo(nextBossState, uid),
+          message,
+        }
+      })
+
+      return result
+    } catch (error) {
+      console.error('quickReviveWorldBossAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi hoi sinh nhanh Boss the gioi.'
+      )
+    }
+  }
+)
+
+export const claimWorldBossRankingRewardAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      const result = await db.runTransaction(async (transaction) => {
+        const userRef = db.collection('users').doc(uid)
+        const publicRef = db.collection('publicPlayers').doc(uid)
+        const bossRef = db.collection('worldBoss').doc(WORLD_BOSS_DOC_ID)
+
+        const [userSnap, bossSnap] = await Promise.all([
+          transaction.get(userRef),
+          transaction.get(bossRef),
+        ])
+
+        const userData = userSnap.exists ? userSnap.data() : {}
+        const saveData = normalizeSaveData(userData?.saveData)
+        const profile = userData?.profile || { displayName: '' }
+        const bossState = normalizeWorldBossState(bossSnap.exists ? bossSnap.data() : null)
+        const rewardInfo = getWorldBossRankingRewardInfo(bossState, uid)
+
+        if (!rewardInfo.claimable) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            viewerUid: uid,
+            boss: buildWorldBossStatePayload(bossState),
+            rankings: sortWorldBossRankings(bossState.rankings),
+            lastFinishedRankings: Array.isArray(bossState.lastFinishedRankings)
+              ? bossState.lastFinishedRankings
+              : [],
+            logs: sanitizeWorldBossLogs(bossState.logs),
+            rankingReward: rewardInfo,
+            message: rewardInfo.claimed
+              ? 'Ban da nhan thuong top sat thuong roi.'
+              : 'Ban khong nam trong top sat thuong cua dot boss vua roi.',
+          }
+        }
+
+        const nextPlayer = {
+          ...saveData.player,
+          spiritStones:
+            (Number(saveData.player?.spiritStones) || 0) + Number(rewardInfo.reward || 0),
+        }
+        const nextBossState = {
+          ...bossState,
+          rankingRewardClaims: {
+            ...(bossState.rankingRewardClaims || {}),
+            [uid]: {
+              cycleId: bossState.lastFinishedCycleId || 0,
+              rank: rewardInfo.rank,
+              claimedAtMs: Date.now(),
+            },
+          },
+        }
+        const message = `Ban nhan thuong top ${rewardInfo.rank}: ${rewardInfo.reward} linh thach.`
+        const payload = buildNextSaveData(saveData, {
+          player: nextPlayer,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          message,
+        })
+
+        transaction.set(bossRef, nextBossState, { merge: true })
+        transaction.set(
+          userRef,
+          {
+            email: userData?.email || '',
+            role: userData?.role || 'player',
+            profile,
+            saveData: payload,
+            updatedAt: FieldValue.serverTimestamp(),
+            lastActionAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        )
+        transaction.set(
+          publicRef,
+          buildPublicPlayerPayload(uid, payload.player, profile),
+          { merge: true }
+        )
+
+        return {
+          ok: true,
+          player: payload.player,
+          herbGarden: payload.herbGarden,
+          crafting: payload.crafting,
+          viewerUid: uid,
+          boss: buildWorldBossStatePayload(nextBossState),
+          rankings: sortWorldBossRankings(nextBossState.rankings),
+          lastFinishedRankings: Array.isArray(nextBossState.lastFinishedRankings)
+            ? nextBossState.lastFinishedRankings
+            : [],
+          logs: sanitizeWorldBossLogs(nextBossState.logs),
+          rankingReward: getWorldBossRankingRewardInfo(nextBossState, uid),
+          message,
+        }
+      })
+
+      return result
+    } catch (error) {
+      console.error('claimWorldBossRankingRewardAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi nhan thuong top sat thuong boss.'
+      )
+    }
+  }
+)
+
+export const fetchWelfareStateAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData, context) => ({
+        ok: true,
+        player: saveData.player,
+        herbGarden: saveData.herbGarden,
+        crafting: saveData.crafting,
+        welfare: normalizeWelfareState(saveData.welfare, context.now),
+        appendLog: false,
+        message: 'Da tai Phuc Loi.',
+      }))
+    } catch (error) {
+      console.error('fetchWelfareStateAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi tai Phuc Loi.'
+      )
+    }
+  }
+)
+
+export const claimLoginRewardAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData, context) => {
+        const now = context.now
+        const welfare = normalizeWelfareState(saveData.welfare, now)
+        const todaySerial = getVnDaySerial(now)
+
+        if ((Number(welfare.lastLoginClaimDaySerial) || 0) === todaySerial) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            welfare,
+            appendLog: false,
+            message: 'Hom nay ban da nhan qua dang nhap roi.',
+          }
+        }
+
+        const claimDay = getNextLoginRewardDay(welfare, now)
+        const rewardConfig = DAILY_LOGIN_REWARDS[claimDay - 1]
+        const reward = normalizeRewardPayload(rewardConfig?.reward)
+        const applied = applyRewardPayload(saveData.player, reward)
+
+        if (!applied.ok) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            welfare,
+            appendLog: false,
+            message: applied.message || 'Khong the nhan qua dang nhap.',
+          }
+        }
+
+        return {
+          ok: true,
+          player: applied.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          welfare: {
+            ...welfare,
+            loginDayIndex: claimDay,
+            lastLoginClaimDaySerial: todaySerial,
+            lastLoginClaimAtMs: now,
+          },
+          message: `Da nhan qua ngay ${claimDay}: ${describeRewardPayload(reward)}.`,
+        }
+      })
+    } catch (error) {
+      console.error('claimLoginRewardAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi nhan qua dang nhap.'
+      )
+    }
+  }
+)
+
+export const claimDailyMissionRewardAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const missionId = String(request.data?.missionId || '').trim()
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!missionId || !DAILY_MISSION_MAP[missionId]) {
+      throw new HttpsError('invalid-argument', 'Nhiem vu khong hop le.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData, context) => {
+        const mission = DAILY_MISSION_MAP[missionId]
+        const welfare = normalizeWelfareState(saveData.welfare, context.now)
+        const progress = Number(welfare.missionProgress?.[missionId]) || 0
+
+        if (welfare.missionClaims?.[missionId]) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            welfare,
+            appendLog: false,
+            message: 'Nhiem vu nay da nhan thuong roi.',
+          }
+        }
+
+        if (progress < mission.target) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            welfare,
+            appendLog: false,
+            message: 'Nhiem vu nay chua hoan thanh.',
+          }
+        }
+
+        const reward = normalizeRewardPayload(mission.reward)
+        const applied = applyRewardPayload(saveData.player, reward)
+
+        if (!applied.ok) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            welfare,
+            appendLog: false,
+            message: applied.message || 'Khong the nhan thuong nhiem vu.',
+          }
+        }
+
+        return {
+          ok: true,
+          player: applied.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          welfare: {
+            ...welfare,
+            missionClaims: {
+              ...(welfare.missionClaims || {}),
+              [missionId]: true,
+            },
+          },
+          message: `Da nhan thuong nhiem vu "${mission.title}": ${describeRewardPayload(reward)}.`,
+        }
+      })
+    } catch (error) {
+      console.error('claimDailyMissionRewardAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi nhan thuong nhiem vu ngay.'
+      )
+    }
+  }
+)
+
+export const claimDailyActivityRewardAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const threshold = Math.max(0, Number(request.data?.threshold) || 0)
+    const chest = DAILY_ACTIVITY_CHEST_MAP[String(threshold)]
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!chest) {
+      throw new HttpsError('invalid-argument', 'Moc hoat dong khong hop le.')
+    }
+
+    try {
+      return await runPlayerAction(uid, (saveData, context) => {
+        const welfare = normalizeWelfareState(saveData.welfare, context.now)
+        const points = getDailyActivityPoints(welfare, context.now)
+
+        if (welfare.activityClaims?.[String(threshold)]) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            welfare,
+            appendLog: false,
+            message: 'Ban da nhan moc hoat dong nay roi.',
+          }
+        }
+
+        if (points < threshold) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            welfare,
+            appendLog: false,
+            message: 'Diem hoat dong hom nay chua du de mo moc nay.',
+          }
+        }
+
+        const reward = normalizeRewardPayload(chest.reward)
+        const applied = applyRewardPayload(saveData.player, reward)
+
+        if (!applied.ok) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            welfare,
+            appendLog: false,
+            message: applied.message || 'Khong the nhan thuong moc hoat dong.',
+          }
+        }
+
+        return {
+          ok: true,
+          player: applied.player,
+          herbGarden: saveData.herbGarden,
+          crafting: saveData.crafting,
+          welfare: {
+            ...welfare,
+            activityClaims: {
+              ...(welfare.activityClaims || {}),
+              [String(threshold)]: true,
+            },
+          },
+          message: `Da nhan thuong moc ${threshold} diem: ${describeRewardPayload(reward)}.`,
+        }
+      })
+    } catch (error) {
+      console.error('claimDailyActivityRewardAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi nhan thuong moc hoat dong.'
+      )
+    }
+  }
+)
+
 export const redeemRewardCodeAction = onCall(
   { region: 'asia-southeast1' },
   async (request) => {
@@ -2559,6 +4437,123 @@ export const deleteRewardCodeAction = onCall(
   }
 )
 
+export const listRewardCodesAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    await assertAdmin(uid)
+
+    try {
+      const snap = await db
+        .collection('giftCodes')
+        .orderBy('createdAt', 'desc')
+        .limit(50)
+        .get()
+
+      const codes = snap.docs.map((doc) => {
+        const data = doc.data() || {}
+        return {
+          code: String(data.code || doc.id),
+          note: String(data.note || ''),
+          active: data.active !== false,
+          maxUses: Number(data.maxUses) || 1,
+          useCount: Number(data.useCount) || 0,
+          reward: normalizeRewardPayload(data.reward),
+          createdBy: String(data.createdBy || ''),
+        }
+      })
+
+      return {
+        ok: true,
+        codes,
+      }
+    } catch (error) {
+      console.error('listRewardCodesAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi tai danh sach code.'
+      )
+    }
+  }
+)
+
+export const updateRewardCodeAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const code = normalizeGiftCode(request.data?.code)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!code) {
+      throw new HttpsError('invalid-argument', 'Code khong hop le.')
+    }
+
+    await assertAdmin(uid)
+
+    const reward = normalizeRewardPayload(request.data?.reward)
+    const note = String(request.data?.note || '').trim().slice(0, 200)
+    const maxUses = Math.max(1, Number(request.data?.maxUses) || 1)
+    const active = request.data?.active !== false
+
+    if (!hasRewardPayloadContent(reward)) {
+      throw new HttpsError('invalid-argument', 'Phan thuong code khong hop le.')
+    }
+
+    try {
+      const codeRef = db.collection('giftCodes').doc(code)
+      const snap = await codeRef.get()
+
+      if (!snap.exists) {
+        return {
+          ok: false,
+          message: 'Khong tim thay code nay.',
+        }
+      }
+
+      const data = snap.data() || {}
+      const useCount = Number(data.useCount) || 0
+
+      if (maxUses < useCount) {
+        return {
+          ok: false,
+          message: `Code da duoc dung ${useCount} luot, khong the dat maxUses thap hon.`,
+        }
+      }
+
+      await codeRef.set(
+        {
+          reward,
+          note,
+          maxUses,
+          active,
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedBy: uid,
+        },
+        { merge: true }
+      )
+
+      return {
+        ok: true,
+        message: `Da cap nhat code ${code}.`,
+      }
+    } catch (error) {
+      console.error('updateRewardCodeAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi cap nhat code.'
+      )
+    }
+  }
+)
+
 export const upgradeHerbGardenAction = onCall(
   { region: 'asia-southeast1' },
   async (request) => {
@@ -2646,6 +4641,7 @@ export const harvestHerbSlotAction = onCall(
           player: result?.player || saveData.player,
           herbGarden: result?.herbGarden || saveData.herbGarden,
           crafting: saveData.crafting,
+          welfareProgress: result?.ok ? { herb_harvest_3: 1 } : {},
           message: result?.message || 'Khong the thu hoach o nay.',
         }
       })
@@ -2681,6 +4677,7 @@ export const harvestAllHerbsAction = onCall(
           player: result?.player || saveData.player,
           herbGarden: result?.herbGarden || saveData.herbGarden,
           crafting: saveData.crafting,
+          welfareProgress: result?.ok ? { herb_harvest_3: 1 } : {},
           message: result?.message || 'Khong co o nao san sang thu hoach.',
         }
       })
@@ -2723,6 +4720,7 @@ export const startAlchemyCraftAction = onCall(
           player: result?.player || saveData.player,
           herbGarden: saveData.herbGarden,
           crafting: result?.crafting ?? saveData.crafting,
+          welfareProgress: result?.ok ? { alchemy_1: 1 } : {},
           message: result?.message || 'Khong the bat dau luyen dan.',
         }
       })
@@ -2799,7 +4797,7 @@ export const enterDungeonAction = onCall(
 
     try {
       return await runPlayerAction(uid, (saveData) => {
-        if (floor !== 1 && floor !== 2) {
+        if (floor !== 1 && floor !== 2 && floor !== DUNGEON_FLOOR_LANG_VUONG) {
           return {
             ok: false,
             player: saveData.player,
@@ -2825,7 +4823,22 @@ export const enterDungeonAction = onCall(
           }
         }
 
-        const enemy = floor === 1 ? createRandomFloor1Monster() : createBoss(2)
+        const entryCost = getDungeonEntryCost(floor)
+
+        if ((Number(saveData.player?.spiritStones) || 0) < entryCost) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: `Khong du ${entryCost} linh thach de vao ${getDungeonFloorLabel(floor)}.`,
+            saveDataPatch: {
+              combatLogs: saveData.combatLogs,
+            },
+          }
+        }
+
+        const enemy = createDungeonEnemy(floor)
         const combatLogs = sanitizeCombatLogs([
           `⚔️ Bạn tiến vào Bí Cảnh tầng ${floor}.`,
           `👹 Gặp ${enemy.name}.`,
@@ -2833,7 +4846,13 @@ export const enterDungeonAction = onCall(
 
         return {
           ok: true,
-          player: saveData.player,
+          player: {
+            ...saveData.player,
+            spiritStones: Math.max(
+              0,
+              (Number(saveData.player?.spiritStones) || 0) - entryCost
+            ),
+          },
           herbGarden: saveData.herbGarden,
           crafting: saveData.crafting,
           message: `Bạn tiến vào Bí Cảnh tầng ${floor}.`,
@@ -2867,6 +4886,22 @@ export const leaveDungeonAction = onCall(
 
     try {
       return await runPlayerAction(uid, (saveData) => {
+        if (!canLeaveDungeonEncounter(saveData.currentEnemy)) {
+          return {
+            ok: false,
+            player: saveData.player,
+            herbGarden: saveData.herbGarden,
+            crafting: saveData.crafting,
+            message: 'Lang Vuong da xuat hien, khong the roi bi canh luc nay.',
+            saveDataPatch: {
+              combatLogs: sanitizeCombatLogs([
+                ...saveData.combatLogs,
+                'Lang Vuong khoa chat chien truong, ban khong the rut lui.',
+              ]),
+            },
+          }
+        }
+
         const combatLogs = sanitizeCombatLogs([
           ...saveData.combatLogs,
           '🚪 Bạn rời khỏi bí cảnh.',
@@ -3044,30 +5079,38 @@ export const attackDungeonEnemyAction = onCall(
 
         if (result.isEnemyDead) {
           if (saveData.currentEnemy.type === 'monster') {
+            const reward = getDungeonMonsterReward(
+              saveData.currentDungeonFloor,
+              saveData.currentEnemy
+            )
             const nextKillCount = (Number(saveData.killCount) || 0) + 1
-            const nextEnemy =
-              saveData.currentDungeonFloor === 1
-                ? spawnFloor1Enemy(nextKillCount)
-                : createBoss(2)
+            const nextEnemy = createDungeonEnemy(
+              saveData.currentDungeonFloor,
+              nextKillCount
+            )
 
             return {
               ok: true,
               player: {
                 ...turnPlayer,
                 hp: result.nextPlayer.hp,
-                exp: (Number(turnPlayer?.exp) || 0) + 10,
-                spiritStones: (Number(turnPlayer?.spiritStones) || 0) + 1,
+                exp:
+                  (Number(turnPlayer?.exp) || 0) + (Number(reward.exp) || 0),
+                spiritStones:
+                  (Number(turnPlayer?.spiritStones) || 0) +
+                  (Number(reward.spiritStones) || 0),
               },
               herbGarden: saveData.herbGarden,
               crafting: saveData.crafting,
-              message: `Bạn đánh bại ${saveData.currentEnemy.name}, nhận 10 EXP và 1 linh thạch.`,
+              welfareProgress: { dungeon_attack_10: 1 },
+              message: reward.message,
               saveDataPatch: {
                 currentEnemy: nextEnemy,
                 killCount: nextKillCount,
                 combatLogs: sanitizeCombatLogs([
                   ...combatLogs,
                   `🔥 Bạn đánh bại ${saveData.currentEnemy.name}.`,
-                  '🎁 Nhận 10 EXP và 1 linh thạch.',
+                  reward.exp > 0 ? `🎁 Nhận ${reward.exp} EXP và ${reward.spiritStones} linh thạch.` : `🎁 Nhận ${reward.spiritStones} linh thạch.`,
                   `👹 Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`,
                 ]),
               },
@@ -3075,10 +5118,17 @@ export const attackDungeonEnemyAction = onCall(
           }
 
           const drop = getBossDrop(saveData.currentDungeonFloor)
-          const nextEnemy =
-            saveData.currentDungeonFloor === 1
-              ? createRandomFloor1Monster()
-              : createBoss(2)
+          const nextEnemy = createDungeonEnemy(saveData.currentDungeonFloor)
+          const nextInventory = (drop.equipments || []).reduce(
+            (inventory, item) =>
+              addItemToInventory(
+                inventory,
+                createEquipmentInstance(item.defId, {
+                  bonusStats: item.bonusStats || {},
+                })
+              ),
+            turnPlayer?.inventory || []
+          )
 
           return {
             ok: true,
@@ -3093,20 +5143,22 @@ export const attackDungeonEnemyAction = onCall(
                 (Number(drop.spiritStones) || 0),
               herbs:
                 (Number(turnPlayer?.herbs) || 0) + (Number(drop.herbs) || 0),
+              inventory: nextInventory,
             },
             herbGarden: saveData.herbGarden,
             crafting: saveData.crafting,
-            message: `Bạn đánh bại ${saveData.currentEnemy.name}, nhận ${
-              saveData.currentEnemy?.rewardExp ?? 0
-            } EXP. ${drop.message}`,
+            welfareProgress: { dungeon_attack_10: 1 },
+            message: drop.message,
+
+
             saveDataPatch: {
               currentEnemy: nextEnemy,
               combatLogs: sanitizeCombatLogs([
                 ...combatLogs,
                 `🔥 Bạn đánh bại ${saveData.currentEnemy.name}.`,
-                `🎁 Nhận ${saveData.currentEnemy?.rewardExp ?? 0} EXP, +${
-                  drop.spiritStones ?? 0
-                } linh thạch, +${drop.herbs ?? 0} dược thảo.`,
+                `🎁 ${drop.message}`,
+
+
                 `👹 Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`,
               ]),
             },
@@ -3145,6 +5197,7 @@ export const attackDungeonEnemyAction = onCall(
           herbGarden: saveData.herbGarden,
           crafting: saveData.crafting,
           message: 'Chiến đấu tiếp diễn.',
+          welfareProgress: { dungeon_attack_10: 1 },
           saveDataPatch: {
             currentEnemy: {
               ...saveData.currentEnemy,

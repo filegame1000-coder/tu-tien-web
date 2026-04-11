@@ -1,10 +1,15 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 const defaultRewardJson = `{
   "spiritStones": 5000
 }`
 
-export default function CodePanel({ player, actions, isAdmin }) {
+function pickMessage(latestMessage, fallback) {
+  const normalized = typeof latestMessage === 'string' ? latestMessage.trim() : ''
+  return normalized || fallback
+}
+
+export default function CodePanel({ player, actions, isAdmin, latestMessage = '' }) {
   const [codeInput, setCodeInput] = useState('')
   const [adminCode, setAdminCode] = useState('TANG-5000-LT')
   const [deleteCodeInput, setDeleteCodeInput] = useState('KHAI-TONG-2026')
@@ -13,23 +18,50 @@ export default function CodePanel({ player, actions, isAdmin }) {
   const [rewardJson, setRewardJson] = useState(defaultRewardJson)
   const [lastCreatedCode, setLastCreatedCode] = useState('')
   const [status, setStatus] = useState('')
+  const [codeList, setCodeList] = useState([])
+  const [selectedCode, setSelectedCode] = useState('')
+  const [active, setActive] = useState(true)
+
+  useEffect(() => {
+    if (!latestMessage) return
+    setStatus(latestMessage)
+  }, [latestMessage])
+
+  async function refreshCodeList(showStatus = true) {
+    if (!isAdmin) return
+
+    if (showStatus) {
+      setStatus('Đang tải lại danh sách code...')
+    }
+
+    const codes = await actions.listRewardCodes()
+    setCodeList(Array.isArray(codes) ? codes : [])
+
+    if (showStatus) {
+      setStatus(`Đã tải ${Array.isArray(codes) ? codes.length : 0} code.`)
+    }
+  }
+
+  useEffect(() => {
+    void refreshCodeList(false)
+  }, [isAdmin])
 
   async function handleRedeem() {
     if (!codeInput.trim()) {
-      setStatus('Hãy nhập code trước khi nhận quà.')
+      setStatus('Hãy nhập mã trước khi nhận quà.')
       return
     }
 
-    setStatus('Đang kiểm tra code...')
-    const success = await actions.redeemCode(codeInput)
+    setStatus('Đang kiểm tra mã...')
+    const success = await actions.redeemCode(codeInput.trim())
 
     if (success) {
       setCodeInput('')
-      setStatus('Nhận code thành công.')
+      setStatus(pickMessage(latestMessage, 'Nhận mã thành công.'))
       return
     }
 
-    setStatus('Không nhận được code. Hãy kiểm tra code có tồn tại, còn lượt dùng và frontend đã lên bản mới chưa.')
+    setStatus(pickMessage(latestMessage, 'Sai mã, mã đã hết lượt hoặc bạn đã dùng mã này rồi.'))
   }
 
   async function handleCreate() {
@@ -53,11 +85,46 @@ export default function CodePanel({ player, actions, isAdmin }) {
     if (result?.code) {
       setLastCreatedCode(result.code)
       setAdminCode(result.code)
-      setStatus(`Đã tạo code ${result.code}.`)
+      setSelectedCode(result.code)
+      setStatus(pickMessage(latestMessage, `Đã tạo code ${result.code}.`))
+      await refreshCodeList(false)
       return
     }
 
-    setStatus('Tạo code thất bại.')
+    setStatus(pickMessage(latestMessage, 'Tạo code thất bại.'))
+  }
+
+  async function handleUpdate() {
+    if (!selectedCode) {
+      setStatus('Hãy chọn một code trong danh sách để chỉnh sửa.')
+      return
+    }
+
+    let parsedReward
+
+    try {
+      parsedReward = JSON.parse(rewardJson)
+    } catch {
+      setStatus('Reward JSON chưa đúng định dạng.')
+      return
+    }
+
+    setStatus('Đang cập nhật code...')
+    const result = await actions.updateRewardCode({
+      code: selectedCode,
+      maxUses: Number(maxUses) || 1,
+      note,
+      reward: parsedReward,
+      active,
+    })
+
+    if (result?.ok) {
+      setStatus(pickMessage(latestMessage, `Đã cập nhật code ${selectedCode}.`))
+      await refreshCodeList(false)
+      return
+    }
+
+    setStatus(pickMessage(latestMessage, 'Cập nhật code thất bại.'))
   }
 
   async function handleDelete() {
@@ -67,15 +134,28 @@ export default function CodePanel({ player, actions, isAdmin }) {
     }
 
     setStatus('Đang khóa code...')
-    const success = await actions.deleteRewardCode(deleteCodeInput)
+    const success = await actions.deleteRewardCode(deleteCodeInput.trim())
 
     if (success) {
+      const deletedCode = deleteCodeInput.trim()
       setDeleteCodeInput('')
-      setStatus('Đã khóa code thành công.')
+      setStatus(pickMessage(latestMessage, `Đã khóa code ${deletedCode}.`))
+      await refreshCodeList(false)
       return
     }
 
-    setStatus('Không khóa được code này.')
+    setStatus(pickMessage(latestMessage, 'Không khóa được code này.'))
+  }
+
+  function handleSelectCode(codeItem) {
+    setSelectedCode(codeItem.code)
+    setAdminCode(codeItem.code)
+    setDeleteCodeInput(codeItem.code)
+    setMaxUses(String(codeItem.maxUses || 1))
+    setNote(codeItem.note || '')
+    setRewardJson(JSON.stringify(codeItem.reward || {}, null, 2))
+    setActive(codeItem.active !== false)
+    setStatus(`Đang chỉnh sửa code ${codeItem.code}.`)
   }
 
   return (
@@ -114,6 +194,32 @@ export default function CodePanel({ player, actions, isAdmin }) {
         {isAdmin ? (
           <div className="content-stack">
             <div className="mini-panel">
+              <div className="mini-panel-title">Danh sách code đã tạo</div>
+              <div className="dao-auth-form">
+                <button className="dao-btn dao-btn-muted" onClick={() => refreshCodeList(true)}>
+                  Tải lại danh sách
+                </button>
+
+                <div className="content-stack" style={{ marginTop: 12 }}>
+                  {codeList.length > 0 ? (
+                    codeList.map((codeItem) => (
+                      <button
+                        key={codeItem.code}
+                        className={`dao-btn ${selectedCode === codeItem.code ? 'dao-btn-primary' : 'dao-btn-muted'}`}
+                        onClick={() => handleSelectCode(codeItem)}
+                      >
+                        {codeItem.code} | {codeItem.useCount}/{codeItem.maxUses} |{' '}
+                        {codeItem.active ? 'Đang mở' : 'Đã khóa'}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="dao-auth-note">Chưa có code nào hoặc chưa tải được danh sách.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="mini-panel">
               <div className="mini-panel-title">Khóa/Xóa code admin</div>
               <div className="dao-auth-form">
                 <label className="dao-auth-label">Mã code cần khóa</label>
@@ -130,7 +236,7 @@ export default function CodePanel({ player, actions, isAdmin }) {
             </div>
 
             <div className="mini-panel">
-              <div className="mini-panel-title">Tạo code admin</div>
+              <div className="mini-panel-title">Tạo / chỉnh sửa code admin</div>
 
               <div className="dao-auth-form">
                 <label className="dao-auth-label">Mã code</label>
@@ -157,6 +263,16 @@ export default function CodePanel({ player, actions, isAdmin }) {
                   className="dao-input dao-auth-input"
                 />
 
+                <label className="dao-auth-label">
+                  <input
+                    type="checkbox"
+                    checked={active}
+                    onChange={(event) => setActive(event.target.checked)}
+                    style={{ marginRight: 8 }}
+                  />
+                  Code đang hoạt động
+                </label>
+
                 <label className="dao-auth-label">Reward JSON</label>
                 <textarea
                   value={rewardJson}
@@ -170,9 +286,14 @@ export default function CodePanel({ player, actions, isAdmin }) {
                   Mẫu hiện tại đang là code tặng 5000 linh thạch.
                 </div>
 
-                <button className="dao-btn dao-btn-accent" onClick={handleCreate}>
-                  Tạo code
-                </button>
+                <div className="action-row">
+                  <button className="dao-btn dao-btn-accent" onClick={handleCreate}>
+                    Tạo code
+                  </button>
+                  <button className="dao-btn dao-btn-primary" onClick={handleUpdate}>
+                    Lưu chỉnh sửa
+                  </button>
+                </div>
 
                 {lastCreatedCode ? (
                   <div className="dao-auth-message">
@@ -184,7 +305,11 @@ export default function CodePanel({ player, actions, isAdmin }) {
           </div>
         ) : null}
 
-        {status ? <div className="dao-auth-message" style={{ marginTop: 18 }}>{status}</div> : null}
+        {status ? (
+          <div className="dao-auth-message" style={{ marginTop: 18 }}>
+            {status}
+          </div>
+        ) : null}
       </div>
     </section>
   )

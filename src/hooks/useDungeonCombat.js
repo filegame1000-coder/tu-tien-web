@@ -1,7 +1,10 @@
 import {
-  createBoss,
-  createRandomFloor1Monster,
+  canLeaveDungeon,
+  createFloorEnemy,
   getBossDrop,
+  getDungeonEntryCost,
+  getDungeonFloorLabel,
+  getMonsterReward,
 } from '../systems/dungeon'
 import {
   buildCombatEntityFromEnemy,
@@ -10,6 +13,7 @@ import {
   resolveCombatRound,
   resolveSkillAttack,
 } from '../systems/combat'
+import { createEquipmentInstance } from '../systems/equipment'
 import {
   advanceSkillCooldowns,
   consumeSkillForTurn,
@@ -20,6 +24,14 @@ import {
   enterDungeonAction,
   leaveDungeonAction,
 } from '../services/gameApi'
+
+function createDroppedEquipmentInstances(equipments = []) {
+  return equipments.map((item) =>
+    createEquipmentInstance(item.defId, {
+      bonusStats: item.bonusStats || {},
+    })
+  )
+}
 
 export function useDungeonCombat({
   player,
@@ -60,37 +72,50 @@ export function useDungeonCombat({
     setDungeonCooldownUntil(null)
   }
 
-  function spawnFloor1Enemy(nextKillCount) {
-    if (nextKillCount > 0 && nextKillCount % 10 === 0) {
-      return createBoss(1)
-    }
-
-    return createRandomFloor1Monster()
+  function spawnNextEnemyLocal(floor, nextKillCount = 0) {
+    return createFloorEnemy(floor, nextKillCount)
   }
 
   function enterDungeonLocal(floor) {
+    const floorLabel = getDungeonFloorLabel(floor)
+    const entryCost = getDungeonEntryCost(floor)
+
+    if (entryCost > 0 && (Number(player?.spiritStones) || 0) < entryCost) {
+      pushLog(`Không đủ ${entryCost} linh thạch để vào ${floorLabel}.`)
+      return false
+    }
+
     clearCombatLog()
     setCurrentDungeonFloor(floor)
 
-    if (floor === 1) {
-      const enemy = createRandomFloor1Monster()
-      setCurrentEnemy(enemy)
-      pushLog('Bạn tiến vào Bí Cảnh tầng 1. [dev local]')
-      pushCombatLog('Bạn tiến vào Bí Cảnh tầng 1.')
-      pushCombatLog(`Gặp ${enemy.name}.`)
+    const enemy = spawnNextEnemyLocal(floor)
+    setCurrentEnemy(enemy)
+    setKillCount(0)
+
+    if (entryCost > 0) {
+      setPlayer((prev) => ({
+        ...prev,
+        spiritStones: Math.max(0, (Number(prev?.spiritStones) || 0) - entryCost),
+      }))
+      pushLog(`Bạn tiến vào ${floorLabel}, tiêu hao ${entryCost} linh thạch. [dev local]`)
+      pushCombatLog(`Bạn tiến vào ${floorLabel}, tiêu hao ${entryCost} linh thạch.`)
     } else {
-      const enemy = createBoss(2)
-      setCurrentEnemy(enemy)
-      pushLog('Bạn tiến vào Bí Cảnh tầng 2. [dev local]')
-      pushCombatLog('Bạn tiến vào Bí Cảnh tầng 2.')
-      pushCombatLog(`Gặp ${enemy.name}.`)
+      pushLog(`Bạn tiến vào ${floorLabel}. [dev local]`)
+      pushCombatLog(`Bạn tiến vào ${floorLabel}.`)
     }
 
+    pushCombatLog(`Gặp ${enemy.name}.`)
     setActiveTab('dungeon')
     return true
   }
 
   function leaveDungeonLocal() {
+    if (!canLeaveDungeon(currentEnemy)) {
+      pushLog('Lang Vương đã xuất hiện, không thể rời bí cảnh lúc này.')
+      pushCombatLog('Lang Vương khóa chặt chiến trường, bạn không thể rời bí cảnh.')
+      return false
+    }
+
     exitDungeonLocal()
     pushLog('Bạn rời khỏi bí cảnh. [dev local]')
     pushCombatLog('Bạn rời khỏi bí cảnh.')
@@ -135,7 +160,7 @@ export function useDungeonCombat({
         skillDef.damageMultiplier
       )
       const skillLogs = [
-        `${player.name || 'Bạn'} thi triển ${skillDef.name}, tiêu hao ${skillDef.manaCost} Ki, còn lại ${playerAfterTurn.mp} Ki và cường hóa 220% sát thương.`,
+        `${player.name || 'Bạn'} thi triển ${skillDef.name}, tiêu hao ${skillDef.manaCost} Ki, còn lại ${playerAfterTurn.mp} Ki.`,
         playerAttack.log,
       ]
 
@@ -163,6 +188,7 @@ export function useDungeonCombat({
           hp: playerAfterTurn.hp,
           mp: playerAfterTurn.mp,
         })
+
         result = {
           playerAttack,
           enemyAttack,
@@ -192,23 +218,25 @@ export function useDungeonCombat({
 
     if (result.isEnemyDead) {
       if (currentEnemy.type === 'monster') {
+        const reward = getMonsterReward(currentDungeonFloor, currentEnemy)
+        const nextKillCount = killCount + 1
+        const nextEnemy = spawnNextEnemyLocal(currentDungeonFloor, nextKillCount)
+
         setPlayer((prev) => ({
           ...playerAfterTurn,
           hp: result.nextPlayer.hp,
-          exp: (prev.exp ?? 0) + 10,
-          spiritStones: (prev.spiritStones ?? 0) + 1,
+          exp: (Number(prev?.exp) || 0) + (Number(reward.exp) || 0),
+          spiritStones: (Number(prev?.spiritStones) || 0) + (Number(reward.spiritStones) || 0),
         }))
 
-        const nextKillCount = killCount + 1
         setKillCount(nextKillCount)
-        pushLog(`Bạn đánh bại ${currentEnemy.name}, nhận 10 EXP và 1 linh thạch. [dev local]`)
+        pushLog(`${reward.message} [dev local]`)
         pushCombatLog(`Bạn đánh bại ${currentEnemy.name}.`)
-        pushCombatLog('Nhận 10 EXP và 1 linh thạch.')
-
-        const nextEnemy =
-          currentDungeonFloor === 1
-            ? spawnFloor1Enemy(nextKillCount)
-            : createBoss(2)
+        pushCombatLog(
+          reward.exp > 0
+            ? `Nhận ${reward.exp} EXP và ${reward.spiritStones} linh thạch.`
+            : `Nhận ${reward.spiritStones} linh thạch.`
+        )
 
         setCurrentEnemy(nextEnemy)
         pushCombatLog(`Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`)
@@ -216,28 +244,24 @@ export function useDungeonCombat({
       }
 
       const drop = getBossDrop(currentDungeonFloor)
+      const dropItems = createDroppedEquipmentInstances(drop.equipments || [])
+      const nextEnemy = spawnNextEnemyLocal(currentDungeonFloor)
 
       setPlayer((prev) => ({
         ...playerAfterTurn,
         hp: result.nextPlayer.hp,
-        exp: (prev.exp ?? 0) + (currentEnemy.rewardExp ?? 0),
-        spiritStones: (prev.spiritStones ?? 0) + (drop.spiritStones ?? 0),
-        herbs: (prev.herbs ?? 0) + (drop.herbs ?? 0),
+        exp: (Number(prev?.exp) || 0) + (Number(currentEnemy.rewardExp) || 0),
+        spiritStones: (Number(prev?.spiritStones) || 0) + (Number(drop.spiritStones) || 0),
+        herbs: (Number(prev?.herbs) || 0) + (Number(drop.herbs) || 0),
+        inventory: [...(playerAfterTurn.inventory || []), ...dropItems],
       }))
 
-      pushLog(
-        `Bạn đánh bại ${currentEnemy.name}, nhận ${currentEnemy.rewardExp ?? 0} EXP. ${drop.message} [dev local]`
-      )
+      pushLog(`Bạn đánh bại ${currentEnemy.name}. ${drop.message} [dev local]`)
       pushCombatLog(`Bạn đánh bại ${currentEnemy.name}.`)
-      pushCombatLog(
-        `Nhận ${currentEnemy.rewardExp ?? 0} EXP, +${drop.spiritStones ?? 0} linh thạch, +${drop.herbs ?? 0} dược thảo.`
-      )
-
-      const nextEnemy =
-        currentDungeonFloor === 1 ? createRandomFloor1Monster() : createBoss(2)
+      pushCombatLog(drop.message)
+      pushCombatLog(`Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`)
 
       setCurrentEnemy(nextEnemy)
-      pushCombatLog(`Kẻ địch tiếp theo xuất hiện: ${nextEnemy.name}.`)
       return true
     }
 

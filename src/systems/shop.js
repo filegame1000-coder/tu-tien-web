@@ -8,7 +8,7 @@ import { getSkillDef, normalizePlayerSkills } from './skills'
 export const SHOP_SECTIONS = [
   { id: 'equipment', label: 'Shop Trang Bị' },
   { id: 'skills', label: 'Shop Kỹ Năng' },
-  { id: 'consumables', label: 'Shop Bình HP/Ki' },
+  { id: 'consumables', label: 'Shop Dược Phẩm' },
   { id: 'pills', label: 'Shop Đan Dược' },
 ]
 

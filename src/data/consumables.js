@@ -1,10 +1,10 @@
 export const consumableDefs = {
   hp_potion_small: {
     id: 'hp_potion_small',
-    name: 'Bình HP',
+    name: 'Bình Sinh Lực',
     type: 'consumable',
     stackable: true,
-    description: 'Hồi ngay 100 HP.',
+    description: 'Hồi ngay 100 Sinh lực.',
     effect: {
       hp: 100,
     },
@@ -12,10 +12,10 @@ export const consumableDefs = {
 
   mp_potion_small: {
     id: 'mp_potion_small',
-    name: 'Bình Ki',
+    name: 'Bình Pháp Lực',
     type: 'consumable',
     stackable: true,
-    description: 'Hồi ngay 100 MP.',
+    description: 'Hồi ngay 100 Pháp lực.',
     effect: {
       mp: 100,
     },
@@ -27,7 +27,7 @@ export const consumableDefs = {
     type: 'consumable',
     stackable: true,
     description:
-      'Dùng để rèn luyện thể phách, tăng vĩnh viễn 10 chỉ số HP gốc cho nhân vật.',
+      'Dùng để rèn luyện thể phách, tăng vĩnh viễn 10 chỉ số Sinh lực gốc cho nhân vật.',
     effect: {
       baseHp: 10,
     },
@@ -39,7 +39,7 @@ export const consumableDefs = {
     type: 'consumable',
     stackable: true,
     description:
-      'Dùng để bồi dưỡng thần thức, tăng vĩnh viễn 10 chỉ số MP gốc cho nhân vật.',
+      'Dùng để bồi dưỡng thần thức, tăng vĩnh viễn 10 chỉ số Pháp lực gốc cho nhân vật.',
     effect: {
       baseMp: 10,
     },
@@ -51,7 +51,19 @@ export const consumableDefs = {
     type: 'consumable',
     stackable: true,
     description:
-      'Dùng để tinh luyện sát phạt chi khí, tăng vĩnh viễn 1 chỉ số damage gốc cho nhân vật.',
+      'Dùng để tinh luyện sát phạt chi khí, tăng vĩnh viễn 1 chỉ số công gốc cho nhân vật.',
+    effect: {
+      baseDamage: 1,
+    },
+  },
+
+  yeu_dan: {
+    id: 'yeu_dan',
+    name: 'Yêu Đan',
+    type: 'consumable',
+    stackable: true,
+    description:
+      'Tinh hoa yêu lực của Boss thế giới, dùng để tăng vĩnh viễn 1 chỉ số công gốc.',
     effect: {
       baseDamage: 1,
     },

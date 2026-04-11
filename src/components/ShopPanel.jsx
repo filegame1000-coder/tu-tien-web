@@ -4,11 +4,11 @@ import { getShopEntries, SHOP_SECTIONS } from '../systems/shop'
 const effectLabels = {
   damage: 'Sát thương',
   defense: 'Phòng thủ',
-  maxHp: 'HP',
-  hp: 'Hồi HP',
-  mp: 'Hồi Ki',
-  baseHp: 'HP gốc',
-  baseMp: 'Ki gốc',
+  maxHp: 'Sinh lực',
+  hp: 'Hồi Sinh lực',
+  mp: 'Hồi Pháp lực',
+  baseHp: 'Sinh lực gốc',
+  baseMp: 'Pháp lực gốc',
   baseDamage: 'Công gốc',
   dodgeChance: 'Né tránh',
 }
@@ -28,7 +28,7 @@ function renderEffectBadges(entry) {
         {(Number(entry.damageMultiplier) * 100).toFixed(0)}% sát thương
       </span>,
       <span key="mana" className="inventory-stat-chip">
-        {entry.manaCost} Ki
+        {entry.manaCost} Pháp lực
       </span>,
       <span key="cooldown" className="inventory-stat-chip">
         Hồi chiêu {entry.cooldownTurns} lượt

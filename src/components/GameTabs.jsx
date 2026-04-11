@@ -1,35 +1,25 @@
 const extraTabs = [
-  { key: 'tien-cac', label: 'Tiên Các', disabled: false },
-  { key: 'mat-lenh', label: 'Mật lệnh', disabled: false },
-  { key: 'dong-phu', label: 'Động phủ', disabled: false },
-  { key: 'linh-dien', label: 'Linh điền', disabled: false },
-  { key: 'van-thu-vien', label: 'Vạn thư viện', disabled: true },
-  { key: 'hanh-trang', label: 'Hành trang', disabled: false },
-  { key: 'alchemy', label: 'Luyện đan các', disabled: false },
-  { key: 'cultivation', label: 'Luyện khí các', disabled: false },
-  { key: 'dungeon', label: 'Lịch luyện', disabled: false },
-  { key: 'thien-ha', label: 'Thiên hạ', disabled: false },
-  { key: 'su-kien', label: 'Sự kiện', disabled: true },
+  { key: 'shop', label: 'Tiên Các', disabled: false },
+  { key: 'market', label: 'Chợ Giao Dịch', disabled: false },
+  { key: 'codes', label: 'Mật Lệnh', disabled: false },
+  { key: 'welfare', label: 'Phúc Lợi', disabled: false },
+  { key: 'dong-phu', label: 'Động Phủ', disabled: false },
+  { key: 'farm', label: 'Linh Điền', disabled: false },
+  { key: 'van-thu-vien', label: 'Vạn Thư Viện', disabled: true },
+  { key: 'bag', label: 'Hành Trang', disabled: false },
+  { key: 'alchemy', label: 'Luyện Đan Các', disabled: false },
+  { key: 'cultivation', label: 'Luyện Khí Các', disabled: false },
+  { key: 'dungeon', label: 'Lịch Luyện', disabled: false },
+  { key: 'world-boss', label: 'Boss Thế Giới', disabled: false },
+  { key: 'thien-ha', label: 'Thiên Hạ', disabled: false },
+  { key: 'su-kien', label: 'Sự Kiện', disabled: true },
 ]
 
 export default function GameTabs({ activeTab, onChange }) {
   return (
     <div className="dao-tabs">
       {extraTabs.map((tab) => {
-        const mappedKey =
-          tab.key === 'tien-cac'
-            ? 'shop'
-            : tab.key === 'mat-lenh'
-            ? 'codes'
-            : tab.key === 'dong-phu'
-            ? 'dong-phu'
-            : tab.key === 'linh-dien'
-            ? 'farm'
-            : tab.key === 'hanh-trang'
-            ? 'bag'
-            : tab.key
-
-        const isActive = activeTab === mappedKey
+        const isActive = activeTab === tab.key
         const isDisabled = tab.disabled
 
         return (
@@ -38,7 +28,7 @@ export default function GameTabs({ activeTab, onChange }) {
             type="button"
             className={`dao-tab ${isActive ? 'active' : ''} ${isDisabled ? 'ghost' : ''}`}
             onClick={() => {
-              if (!isDisabled) onChange(mappedKey)
+              if (!isDisabled) onChange(tab.key)
             }}
           >
             {tab.label}

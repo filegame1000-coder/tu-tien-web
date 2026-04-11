@@ -111,6 +111,50 @@ export async function purchaseShopItemAction(sectionId, itemId) {
   }
 }
 
+export async function listMarketListingsAction() {
+  try {
+    const fn = httpsCallable(functions, 'listMarketListingsAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('listMarketListingsAction error:', error)
+    throw error
+  }
+}
+
+export async function createMarketListingAction(instanceId, price) {
+  try {
+    const fn = httpsCallable(functions, 'createMarketListingAction')
+    const res = await fn({ instanceId, price })
+    return res.data
+  } catch (error) {
+    console.error('createMarketListingAction error:', error)
+    throw error
+  }
+}
+
+export async function cancelMarketListingAction(listingId) {
+  try {
+    const fn = httpsCallable(functions, 'cancelMarketListingAction')
+    const res = await fn({ listingId })
+    return res.data
+  } catch (error) {
+    console.error('cancelMarketListingAction error:', error)
+    throw error
+  }
+}
+
+export async function buyMarketListingAction(listingId) {
+  try {
+    const fn = httpsCallable(functions, 'buyMarketListingAction')
+    const res = await fn({ listingId })
+    return res.data
+  } catch (error) {
+    console.error('buyMarketListingAction error:', error)
+    throw error
+  }
+}
+
 export async function redeemRewardCodeAction(code) {
   try {
     const fn = httpsCallable(functions, 'redeemRewardCodeAction')
@@ -140,6 +184,28 @@ export async function deleteRewardCodeAction(code) {
     return res.data
   } catch (error) {
     console.error('deleteRewardCodeAction error:', error)
+    throw error
+  }
+}
+
+export async function listRewardCodesAction() {
+  try {
+    const fn = httpsCallable(functions, 'listRewardCodesAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('listRewardCodesAction error:', error)
+    throw error
+  }
+}
+
+export async function updateRewardCodeAction(payload) {
+  try {
+    const fn = httpsCallable(functions, 'updateRewardCodeAction')
+    const res = await fn(payload)
+    return res.data
+  } catch (error) {
+    console.error('updateRewardCodeAction error:', error)
     throw error
   }
 }
@@ -239,6 +305,94 @@ export async function claimAlchemyCraftAction() {
     return res.data
   } catch (error) {
     console.error('claimAlchemyCraftAction error:', error)
+    throw error
+  }
+}
+
+export async function fetchWorldBossAction() {
+  try {
+    const fn = httpsCallable(functions, 'fetchWorldBossAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('fetchWorldBossAction error:', error)
+    throw error
+  }
+}
+
+export async function attackWorldBossAction(skillId = null) {
+  try {
+    const fn = httpsCallable(functions, 'attackWorldBossAction')
+    const res = await fn({ skillId })
+    return res.data
+  } catch (error) {
+    console.error('attackWorldBossAction error:', error)
+    throw error
+  }
+}
+
+export async function quickReviveWorldBossAction() {
+  try {
+    const fn = httpsCallable(functions, 'quickReviveWorldBossAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('quickReviveWorldBossAction error:', error)
+    throw error
+  }
+}
+
+export async function claimWorldBossRankingRewardAction() {
+  try {
+    const fn = httpsCallable(functions, 'claimWorldBossRankingRewardAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('claimWorldBossRankingRewardAction error:', error)
+    throw error
+  }
+}
+
+export async function fetchWelfareStateAction() {
+  try {
+    const fn = httpsCallable(functions, 'fetchWelfareStateAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('fetchWelfareStateAction error:', error)
+    throw error
+  }
+}
+
+export async function claimLoginRewardAction() {
+  try {
+    const fn = httpsCallable(functions, 'claimLoginRewardAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('claimLoginRewardAction error:', error)
+    throw error
+  }
+}
+
+export async function claimDailyMissionRewardAction(missionId) {
+  try {
+    const fn = httpsCallable(functions, 'claimDailyMissionRewardAction')
+    const res = await fn({ missionId })
+    return res.data
+  } catch (error) {
+    console.error('claimDailyMissionRewardAction error:', error)
+    throw error
+  }
+}
+
+export async function claimDailyActivityRewardAction(threshold) {
+  try {
+    const fn = httpsCallable(functions, 'claimDailyActivityRewardAction')
+    const res = await fn({ threshold })
+    return res.data
+  } catch (error) {
+    console.error('claimDailyActivityRewardAction error:', error)
     throw error
   }
 }

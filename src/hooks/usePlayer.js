@@ -12,15 +12,29 @@ import {
   equipCombatSkillAction,
   unequipCombatSkillAction,
   purchaseShopItemAction,
+  listMarketListingsAction,
+  createMarketListingAction,
+  cancelMarketListingAction,
+  buyMarketListingAction,
   redeemRewardCodeAction,
   createRewardCodeAction,
   deleteRewardCodeAction,
+  listRewardCodesAction,
+  updateRewardCodeAction,
   upgradeHerbGardenAction,
   plantHerbSeedAction,
   harvestHerbSlotAction,
   harvestAllHerbsAction,
   startAlchemyCraftAction,
   claimAlchemyCraftAction,
+  fetchWorldBossAction,
+  attackWorldBossAction,
+  quickReviveWorldBossAction,
+  claimWorldBossRankingRewardAction,
+  fetchWelfareStateAction,
+  claimLoginRewardAction,
+  claimDailyMissionRewardAction,
+  claimDailyActivityRewardAction,
 } from '../services/gameApi'
 import { db } from '../firebase'
 
@@ -60,6 +74,11 @@ import {
   unequipSkill,
 } from '../systems/skills'
 import { purchaseShopItem } from '../systems/shop'
+import {
+  applyWelfareProgressState,
+  createDefaultWelfareState,
+  normalizeWelfareState,
+} from '../systems/welfare'
 
 import { useDungeonCombat } from './useDungeonCombat'
 import { useCombatLog } from './useCombatLog'
@@ -92,6 +111,7 @@ function normalizeSaveData(raw) {
     currentEnemy: raw.currentEnemy ?? null,
     killCount: raw.killCount ?? 0,
     dungeonCooldownUntil: raw.dungeonCooldownUntil ?? null,
+    welfare: normalizeWelfareState(raw.welfare || createDefaultWelfareState()),
   }
 }
 
@@ -140,6 +160,9 @@ export function usePlayer(user) {
   const [dungeonCooldownUntil, setDungeonCooldownUntil] = useState(
     saved.dungeonCooldownUntil ?? null
   )
+  const [welfare, setWelfare] = useState(
+    normalizeWelfareState(saved.welfare || createDefaultWelfareState())
+  )
   const [pendingAction, setPendingAction] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -166,6 +189,10 @@ export function usePlayer(user) {
   function pushLog(text) {
     setLogs((prev) => [text, ...prev].slice(0, 20))
     setMessage(text)
+  }
+
+  function applyLocalWelfareProgress(progressPatch) {
+    setWelfare((prev) => applyWelfareProgressState(prev, progressPatch))
   }
 
   function applyServerActionResult(result) {
@@ -210,6 +237,10 @@ export function usePlayer(user) {
     if (Object.prototype.hasOwnProperty.call(result, 'dungeonCooldownUntil')) {
       setDungeonCooldownUntil(result.dungeonCooldownUntil ?? null)
     }
+
+    if (Object.prototype.hasOwnProperty.call(result, 'welfare')) {
+      setWelfare(normalizeWelfareState(result.welfare))
+    }
   }
 
   function applyLoadedSave(nextSaved) {
@@ -232,6 +263,7 @@ export function usePlayer(user) {
     setCurrentEnemy(nextSaved.currentEnemy ?? null)
     setKillCount(nextSaved.killCount ?? 0)
     setDungeonCooldownUntil(nextSaved.dungeonCooldownUntil ?? null)
+    setWelfare(normalizeWelfareState(nextSaved.welfare || createDefaultWelfareState()))
     replaceCombatLog(nextSaved.combatLogs ?? [])
   }
 
@@ -257,6 +289,7 @@ export function usePlayer(user) {
     setCurrentEnemy(nextSaved.currentEnemy ?? null)
     setKillCount(nextSaved.killCount ?? 0)
     setDungeonCooldownUntil(nextSaved.dungeonCooldownUntil ?? null)
+    setWelfare(normalizeWelfareState(nextSaved.welfare || createDefaultWelfareState()))
     replaceCombatLog(nextSaved.combatLogs ?? [])
     setPendingAction(null)
     actionInFlightRef.current = false
@@ -437,6 +470,7 @@ export function usePlayer(user) {
       currentEnemy,
       killCount,
       dungeonCooldownUntil,
+      welfare,
     }
 
     saveGame(payload, user?.uid)
@@ -447,11 +481,13 @@ export function usePlayer(user) {
     message,
     logs,
     combatLogs,
+    welfare,
     activeTab,
     currentDungeonFloor,
     currentEnemy,
     killCount,
     dungeonCooldownUntil,
+    welfare,
     user,
   ])
 
@@ -460,6 +496,7 @@ export function usePlayer(user) {
 
     if (!user) {
       setPlayer((prev) => cultivate(prev))
+      applyLocalWelfareProgress({ cultivate_10: 1 })
       pushLog('Bạn tu luyện và nhận 1 EXP.')
       return true
     }
@@ -476,11 +513,15 @@ export function usePlayer(user) {
       }
 
       applyServerActionResult(result)
+      if (!result?.welfare) {
+        void handleFetchWelfareState()
+      }
       return true
     } catch (error) {
       console.error('Cultivate sync error:', error)
       if (allowDevFallback) {
         setPlayer((prev) => cultivate(prev))
+        applyLocalWelfareProgress({ cultivate_10: 1 })
         pushLog('Bạn tu luyện và nhận 1 EXP. [dev local]')
         return true
       }
@@ -773,6 +814,269 @@ export function usePlayer(user) {
     }
   }
 
+  async function handleListMarketListings() {
+    try {
+      const result = await listMarketListingsAction()
+      if (result?.player) {
+        applyServerActionResult(result)
+      }
+      return Array.isArray(result?.listings) ? result.listings : []
+    } catch (error) {
+      console.error('List market listings error:', error)
+      pushLog('Không tải được danh sách chợ giao dịch.')
+      return []
+    }
+  }
+
+  async function handleCreateMarketListing(instanceId, price) {
+    if (!user) {
+      pushLog('Hãy đăng nhập để đăng bán vật phẩm.')
+      return null
+    }
+
+    try {
+      const result = await createMarketListingAction(instanceId, price)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể đăng bán vật phẩm.')
+        return null
+      }
+
+      applyServerActionResult(result)
+      return result
+    } catch (error) {
+      console.error('Create market listing error:', error)
+      pushLog('Không kết nối được máy chủ giao dịch.')
+      return null
+    }
+  }
+
+  async function handleCancelMarketListing(listingId) {
+    if (!user) {
+      pushLog('Hãy đăng nhập để quản lý sạp hàng.')
+      return false
+    }
+
+    try {
+      const result = await cancelMarketListingAction(listingId)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể rút vật phẩm khỏi chợ.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Cancel market listing error:', error)
+      pushLog('Không kết nối được máy chủ giao dịch.')
+      return false
+    }
+  }
+
+  async function handleBuyMarketListing(listingId) {
+    if (!user) {
+      pushLog('Hãy đăng nhập để mua vật phẩm.')
+      return false
+    }
+
+    try {
+      const result = await buyMarketListingAction(listingId)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể mua vật phẩm này.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      return true
+    } catch (error) {
+      console.error('Buy market listing error:', error)
+      pushLog('Không kết nối được máy chủ giao dịch.')
+      return false
+    }
+  }
+
+  async function handleFetchWorldBoss() {
+    try {
+      const result = await fetchWorldBossAction()
+      if (result?.player) {
+        applyServerActionResult(result)
+      }
+      return result
+    } catch (error) {
+      console.error('Fetch world boss error:', error)
+      pushLog('Không tải được trạng thái Boss thế giới.')
+      return null
+    }
+  }
+
+  async function handleAttackWorldBoss(skillId = null) {
+    if (!user) {
+      pushLog('Hãy đăng nhập để khiêu chiến Boss thế giới.')
+      return null
+    }
+
+    try {
+      const result = await attackWorldBossAction(skillId)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể tấn công Boss thế giới.')
+        return result || null
+      }
+
+      applyServerActionResult(result)
+      if (!result?.welfare) {
+        void handleFetchWelfareState()
+      }
+      return result
+    } catch (error) {
+      console.error('Attack world boss error:', error)
+      pushLog('Không kết nối được chiến trường Boss thế giới.')
+      return null
+    }
+  }
+
+  async function handleClaimWorldBossRankingReward() {
+    if (!user) {
+      pushLog('Hãy đăng nhập để nhận thưởng top sát thương.')
+      return null
+    }
+
+    try {
+      const result = await claimWorldBossRankingRewardAction()
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể nhận thưởng top sát thương.')
+        return result || null
+      }
+
+      applyServerActionResult(result)
+      return result
+    } catch (error) {
+      console.error('Claim world boss ranking reward error:', error)
+      pushLog('Không kết nối được máy chủ nhận thưởng boss.')
+      return null
+    }
+  }
+
+  async function handleQuickReviveWorldBoss() {
+    if (!user) {
+      pushLog('Hãy đăng nhập để hồi sinh nhanh Boss thế giới.')
+      return null
+    }
+
+    try {
+      const result = await quickReviveWorldBossAction()
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể hồi sinh nhanh Boss.')
+        return result || null
+      }
+
+      applyServerActionResult(result)
+      return result
+    } catch (error) {
+      console.error('Quick revive world boss error:', error)
+      pushLog('Không kết nối được máy chủ Boss thế giới.')
+      return null
+    }
+  }
+
+  async function handleFetchWelfareState() {
+    if (!user) return null
+
+    try {
+      const result = await fetchWelfareStateAction()
+      if (result?.player) {
+        applyServerActionResult(result)
+      }
+      return result
+    } catch (error) {
+      console.error('Fetch welfare state error:', error)
+      pushLog('Khong tai duoc Phuc Loi hom nay.')
+      return null
+    }
+  }
+
+  async function handleClaimLoginReward() {
+    if (!user) {
+      pushLog('Hay dang nhap de nhan qua dang nhap.')
+      return false
+    }
+
+    try {
+      const result = await claimLoginRewardAction()
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the nhan qua dang nhap.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      if (!result?.welfare) {
+        void handleFetchWelfareState()
+      }
+      return true
+    } catch (error) {
+      console.error('Claim login reward error:', error)
+      pushLog('Khong ket noi duoc may chu Phuc Loi.')
+      return false
+    }
+  }
+
+  async function handleClaimDailyMissionReward(missionId) {
+    if (!user) {
+      pushLog('Hay dang nhap de nhan thuong nhiem vu ngay.')
+      return false
+    }
+
+    try {
+      const result = await claimDailyMissionRewardAction(missionId)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the nhan thuong nhiem vu ngay.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      if (!result?.welfare) {
+        void handleFetchWelfareState()
+      }
+      return true
+    } catch (error) {
+      console.error('Claim daily mission reward error:', error)
+      pushLog('Khong ket noi duoc may chu nhiem vu ngay.')
+      return false
+    }
+  }
+
+  async function handleClaimDailyActivityReward(threshold) {
+    if (!user) {
+      pushLog('Hay dang nhap de nhan thuong moc hoat dong.')
+      return false
+    }
+
+    try {
+      const result = await claimDailyActivityRewardAction(threshold)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the nhan thuong moc hoat dong.')
+        return false
+      }
+
+      applyServerActionResult(result)
+      if (!result?.welfare) {
+        void handleFetchWelfareState()
+      }
+      return true
+    } catch (error) {
+      console.error('Claim daily activity reward error:', error)
+      pushLog('Khong ket noi duoc may chu Phuc Loi.')
+      return false
+    }
+  }
+
   async function handleRedeemCode(code) {
     if (!user) {
       pushLog('Hãy đăng nhập để nhập code.')
@@ -839,6 +1143,45 @@ export function usePlayer(user) {
       console.error('Delete reward code error:', error)
       pushLog('Không kết nối được máy chủ xóa code.')
       return false
+    }
+  }
+
+  async function handleListRewardCodes() {
+    if (!user) {
+      pushLog('Hãy đăng nhập tài khoản admin để xem danh sách code.')
+      return []
+    }
+
+    try {
+      const result = await listRewardCodesAction()
+      return Array.isArray(result?.codes) ? result.codes : []
+    } catch (error) {
+      console.error('List reward codes error:', error)
+      pushLog('Không tải được danh sách code.')
+      return []
+    }
+  }
+
+  async function handleUpdateRewardCode(payload) {
+    if (!user) {
+      pushLog('Hãy đăng nhập tài khoản admin để sửa code.')
+      return null
+    }
+
+    try {
+      const result = await updateRewardCodeAction(payload)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Không thể cập nhật code.')
+        return null
+      }
+
+      pushLog(result.message || `Đã cập nhật code ${payload.code}.`)
+      return result
+    } catch (error) {
+      console.error('Update reward code error:', error)
+      pushLog('Không kết nối được máy chủ cập nhật code.')
+      return null
     }
   }
 
@@ -955,6 +1298,7 @@ export function usePlayer(user) {
       setPlayer(result.player)
       setCrafting(result.craftState)
       setCraftingRemainMs(getAlchemyRemainingMs(result.craftState))
+      applyLocalWelfareProgress({ alchemy_1: 1 })
       pushLog(result.message)
       return true
     }
@@ -968,6 +1312,9 @@ export function usePlayer(user) {
       }
 
       applyServerActionResult(result)
+      if (!result?.welfare) {
+        void handleFetchWelfareState()
+      }
       return true
     } catch (error) {
       console.error('Start alchemy sync error:', error)
@@ -982,6 +1329,7 @@ export function usePlayer(user) {
         setPlayer(result.player)
         setCrafting(result.craftState)
         setCraftingRemainMs(getAlchemyRemainingMs(result.craftState))
+        applyLocalWelfareProgress({ alchemy_1: 1 })
         pushLog(`${result.message} [dev local]`)
         return true
       }
@@ -1001,6 +1349,7 @@ export function usePlayer(user) {
 
       setPlayer(result.player)
       setHerbGarden(result.herbGarden)
+      applyLocalWelfareProgress({ herb_harvest_3: 1 })
       pushLog(result.message)
       return true
     }
@@ -1014,6 +1363,9 @@ export function usePlayer(user) {
       }
 
       applyServerActionResult(result)
+      if (!result?.welfare) {
+        void handleFetchWelfareState()
+      }
       return true
     } catch (error) {
       console.error('Upgrade herb garden sync error:', error)
@@ -1027,6 +1379,7 @@ export function usePlayer(user) {
 
         setPlayer(result.player)
         setHerbGarden(result.herbGarden)
+        applyLocalWelfareProgress({ herb_harvest_3: 1 })
         pushLog(`${result.message} [dev local]`)
         return true
       }
@@ -1089,6 +1442,7 @@ export function usePlayer(user) {
 
       setPlayer(result.player)
       setHerbGarden(result.herbGarden)
+      applyLocalWelfareProgress({ herb_harvest_3: 1 })
       pushLog(result.message)
       return true
     }
@@ -1102,6 +1456,9 @@ export function usePlayer(user) {
       }
 
       applyServerActionResult(result)
+      if (!result?.welfare) {
+        void handleFetchWelfareState()
+      }
       return true
     } catch (error) {
       console.error('Harvest herb slot sync error:', error)
@@ -1115,6 +1472,7 @@ export function usePlayer(user) {
 
         setPlayer(result.player)
         setHerbGarden(result.herbGarden)
+        applyLocalWelfareProgress({ herb_harvest_3: 1 })
         pushLog(`${result.message} [dev local]`)
         return true
       }
@@ -1240,9 +1598,23 @@ export function usePlayer(user) {
       breakthrough: handleBreakthrough,
       setInitialName: handleSetInitialName,
       purchaseShopItem: handlePurchaseShopItem,
+      listMarketListings: handleListMarketListings,
+      createMarketListing: handleCreateMarketListing,
+      cancelMarketListing: handleCancelMarketListing,
+      buyMarketListing: handleBuyMarketListing,
+      fetchWorldBoss: handleFetchWorldBoss,
+      attackWorldBoss: handleAttackWorldBoss,
+      claimWorldBossRankingReward: handleClaimWorldBossRankingReward,
+      quickReviveWorldBoss: handleQuickReviveWorldBoss,
+      fetchWelfareState: handleFetchWelfareState,
+      claimLoginReward: handleClaimLoginReward,
+      claimDailyMissionReward: handleClaimDailyMissionReward,
+      claimDailyActivityReward: handleClaimDailyActivityReward,
       redeemCode: handleRedeemCode,
       createRewardCode: handleCreateRewardCode,
       deleteRewardCode: handleDeleteRewardCode,
+      listRewardCodes: handleListRewardCodes,
+      updateRewardCode: handleUpdateRewardCode,
       equipSkill: handleEquipSkill,
       unequipSkill: handleUnequipSkill,
       equipItem: handleEquipItem,

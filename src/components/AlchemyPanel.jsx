@@ -51,12 +51,12 @@ function RecipeCard({ recipe, player, crafting, craftingRemainMs, onCraft }) {
         <div className="inventory-stat-list" style={{ marginBottom: 14 }}>
           {itemDef.effect.baseHp ? (
             <span className="inventory-stat-chip">
-              Tăng vĩnh viễn +{itemDef.effect.baseHp} HP gốc
+              Tăng vĩnh viễn +{itemDef.effect.baseHp} Sinh lực gốc
             </span>
           ) : null}
           {itemDef.effect.baseMp ? (
             <span className="inventory-stat-chip">
-              Tăng vĩnh viễn +{itemDef.effect.baseMp} MP gốc
+              Tăng vĩnh viễn +{itemDef.effect.baseMp} Pháp lực gốc
             </span>
           ) : null}
           {itemDef.effect.baseDamage ? (
@@ -145,11 +145,11 @@ export default function AlchemyPanel({
             <strong>{player?.herbs ?? 0}</strong>
           </div>
           <div className="resource-chip">
-            <span>HP gốc</span>
+            <span>Sinh lực gốc</span>
             <strong>{player?.baseStats?.maxHp ?? 0}</strong>
           </div>
           <div className="resource-chip">
-            <span>MP gốc</span>
+            <span>Pháp lực gốc</span>
             <strong>{player?.baseStats?.maxMp ?? 0}</strong>
           </div>
         </div>

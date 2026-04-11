@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { collection, limit, onSnapshot, orderBy, query } from 'firebase/firestore'
+import { collection, onSnapshot } from 'firebase/firestore'
 import { db } from '../firebase'
 
 function toMillis(value) {
@@ -14,8 +14,8 @@ function normalizePublicPlayer(docSnap) {
 
   return {
     uid: data.uid || docSnap.id,
-    name: data.name || 'Vo Danh',
-    realm: data.realm || 'Pham Nhan',
+    name: data.name || 'Vô Danh',
+    realm: data.realm || 'Phàm Nhân',
     stage: Number(data.stage) || 1,
     exp: Number(data.exp) || 0,
     power: Number(data.power) || 0,
@@ -35,14 +35,8 @@ export function usePublicPlayers(currentUid) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    const playersQuery = query(
-      collection(db, 'publicPlayers'),
-      orderBy('power', 'desc'),
-      limit(50)
-    )
-
     const unsub = onSnapshot(
-      playersQuery,
+      collection(db, 'publicPlayers'),
       (snapshot) => {
         setPlayers(snapshot.docs.map((docSnap) => normalizePublicPlayer(docSnap)))
         setLoading(false)
@@ -57,17 +51,16 @@ export function usePublicPlayers(currentUid) {
     return () => unsub()
   }, [])
 
-  const rankedPlayers = useMemo(() => {
-    return players.map((player, index) => ({
+  const preparedPlayers = useMemo(() => {
+    return players.map((player) => ({
       ...player,
-      rank: index + 1,
       isSelf: !!currentUid && player.uid === currentUid,
       isOnline: Date.now() - player.lastSeenAtMs < 5 * 60 * 1000,
     }))
   }, [players, currentUid])
 
   return {
-    publicPlayers: rankedPlayers,
+    publicPlayers: preparedPlayers,
     loading,
   }
 }

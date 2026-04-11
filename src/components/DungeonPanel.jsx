@@ -1,5 +1,10 @@
 import LogPanel from './LogPanel'
 import { getEquippedSkillEntries } from '../systems/skills'
+import {
+  DUNGEON_FLOOR_LANG_VUONG,
+  dungeonFloorDefs,
+  getDungeonFloorLabel,
+} from '../systems/dungeon'
 
 function Bar({ value, max, label }) {
   const safeValue = Number(value) || 0
@@ -21,6 +26,25 @@ function Bar({ value, max, label }) {
   )
 }
 
+function BattleReadout({ hp, maxHp, mp, maxMp }) {
+  return (
+    <div className="requirements-list compact-list" style={{ marginTop: 14 }}>
+      <div>
+        <span>Sinh lực hiện tại</span>
+        <strong>
+          {hp}/{maxHp}
+        </strong>
+      </div>
+      <div>
+        <span>Pháp lực hiện tại</span>
+        <strong>
+          {mp}/{maxMp}
+        </strong>
+      </div>
+    </div>
+  )
+}
+
 export default function DungeonPanel({
   player,
   dungeon,
@@ -30,7 +54,11 @@ export default function DungeonPanel({
 }) {
   const enemy = dungeon?.currentEnemy
   const playerHp = Number(player?.hp) || 0
+  const playerMp = Number(player?.mp) || 0
+  const playerMaxHp = Number(finalStats?.maxHp) || 1
+  const playerMaxMp = Number(finalStats?.maxMp) || 1
   const equippedSkills = getEquippedSkillEntries(player)
+  const isLockedEncounter = Boolean(enemy?.lockedEncounter)
 
   return (
     <section className="altar-card dungeon-card">
@@ -38,22 +66,52 @@ export default function DungeonPanel({
         <div className="altar-header">
           <div>
             <div className="section-kicker">Chiến trường</div>
-            <h2 className="panel-title">Bí Cảnh Thí Luyện</h2>
+            <h2 className="panel-title">Lịch luyện bí cảnh</h2>
           </div>
           <div className="realm-stage-pill">
-            <span>Tầng hiện tại</span>
-            <strong>{dungeon?.currentFloor || 'Chưa vào'}</strong>
+            <span>Bí cảnh hiện tại</span>
+            <strong>
+              {dungeon?.currentFloor ? getDungeonFloorLabel(dungeon.currentFloor) : 'Chưa vào'}
+            </strong>
           </div>
         </div>
 
         {!dungeon?.currentFloor ? (
-          <div className="dungeon-entry-grid">
-            <button className="dao-btn dao-btn-primary" onClick={() => actions.enterDungeon(1)}>
-              Vào Bí Cảnh tầng 1
-            </button>
-            <button className="dao-btn dao-btn-accent" onClick={() => actions.enterDungeon(2)}>
-              Vào Bí Cảnh tầng 2
-            </button>
+          <div className="content-stack">
+            <div className="dungeon-entry-grid">
+              {Object.values(dungeonFloorDefs).map((floor) => (
+                <button
+                  key={floor.id}
+                  className={
+                    floor.id === DUNGEON_FLOOR_LANG_VUONG
+                      ? 'dao-btn dao-btn-accent'
+                      : 'dao-btn dao-btn-primary'
+                  }
+                  onClick={() => actions.enterDungeon(floor.id)}
+                >
+                  {floor.name}
+                  {floor.entryCost > 0 ? ` • ${floor.entryCost} linh thạch` : ''}
+                </button>
+              ))}
+            </div>
+
+            <div className="mini-panel">
+              <div className="mini-panel-title">Quy tắc bí cảnh</div>
+              <div className="requirements-list">
+                <div>
+                  <span>Bí Cảnh tầng 1</span>
+                  <strong>Farm quái thường, 10 mạng gặp boss</strong>
+                </div>
+                <div>
+                  <span>Bí Cảnh tầng 2</span>
+                  <strong>Đối đầu boss ngay khi bước vào</strong>
+                </div>
+                <div>
+                  <span>Bí Cảnh Lang Vương</span>
+                  <strong>Lang Nha liên tục, 10% gặp Lang Vương, phí vào 100 linh thạch</strong>
+                </div>
+              </div>
+            </div>
           </div>
         ) : (
           <>
@@ -63,8 +121,14 @@ export default function DungeonPanel({
                 <div className="muted-text">
                   {player?.realm} • Tầng {player?.stage}
                 </div>
-                <Bar label="HP" value={player?.hp ?? 0} max={finalStats?.maxHp ?? 1} />
-                <Bar label="Ki" value={player?.mp ?? 0} max={finalStats?.maxMp ?? 1} />
+                <Bar label="Sinh lực" value={playerHp} max={playerMaxHp} />
+                <Bar label="Pháp lực" value={playerMp} max={playerMaxMp} />
+                <BattleReadout
+                  hp={playerHp}
+                  maxHp={playerMaxHp}
+                  mp={playerMp}
+                  maxMp={playerMaxMp}
+                />
                 <div className="battle-stats">
                   <span>Sát thương: {finalStats?.damage ?? 0}</span>
                   <span>Phòng thủ: {finalStats?.defense ?? 0}</span>
@@ -80,13 +144,27 @@ export default function DungeonPanel({
                     ? 'Boss'
                     : `${enemy?.realm ?? 'Phàm Nhân'} • Tầng ${enemy?.stage ?? 1}`}
                 </div>
-                <Bar label="HP" value={enemy?.hp ?? 0} max={enemy?.maxHp ?? 1} />
+                <Bar label="Sinh lực" value={enemy?.hp ?? 0} max={enemy?.maxHp ?? 1} />
+                <div className="requirements-list compact-list" style={{ marginTop: 14 }}>
+                  <div>
+                    <span>Sinh lực hiện tại</span>
+                    <strong>
+                      {enemy?.hp ?? 0}/{enemy?.maxHp ?? 1}
+                    </strong>
+                  </div>
+                </div>
                 <div className="battle-stats">
                   <span>Sát thương: {enemy?.damage ?? 0}</span>
                   <span>Phòng thủ: {enemy?.defense ?? 0}</span>
                 </div>
               </div>
             </div>
+
+            {isLockedEncounter ? (
+              <div className="dao-auth-message" style={{ marginTop: 16 }}>
+                Lang Vương đã xuất hiện. Trận chiến này không thể rút lui.
+              </div>
+            ) : null}
 
             <div className="action-row centered">
               <button
@@ -96,7 +174,11 @@ export default function DungeonPanel({
               >
                 Tấn công
               </button>
-              <button className="dao-btn dao-btn-muted" onClick={actions.leaveDungeon}>
+              <button
+                className="dao-btn dao-btn-muted"
+                onClick={actions.leaveDungeon}
+                disabled={isLockedEncounter}
+              >
                 Rời bí cảnh
               </button>
             </div>
@@ -110,7 +192,7 @@ export default function DungeonPanel({
                     !enemy ||
                     playerHp <= 0 ||
                     entry.cooldown > 0 ||
-                    (Number(player?.mp) || 0) < (Number(entry.def?.manaCost) || 0)
+                    playerMp < (Number(entry.def?.manaCost) || 0)
 
                   return (
                     <div key={`skill-slot-${entry.slotIndex}`} className="inventory-card">
@@ -133,7 +215,9 @@ export default function DungeonPanel({
                         <>
                           <p className="inventory-description">{entry.def.description}</p>
                           <div className="inventory-stat-list">
-                            <span className="inventory-stat-chip">Hao Ki: {entry.def.manaCost}</span>
+                            <span className="inventory-stat-chip">
+                              Hao pháp lực: {entry.def.manaCost}
+                            </span>
                             <span className="inventory-stat-chip">
                               Hồi chiêu: {entry.def.cooldownTurns} lượt
                             </span>

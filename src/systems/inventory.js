@@ -98,6 +98,13 @@ export function toInventoryViewModel(item) {
   if (isEquipmentItem(item)) {
     const def = equipmentDefs[item.defId]
     if (!def) return null
+    const baseStats = def.stats || {}
+    const bonusStats = item.bonusStats || {}
+    const mergedStats = { ...baseStats }
+
+    for (const [key, value] of Object.entries(bonusStats)) {
+      mergedStats[key] = (mergedStats[key] || 0) + (value || 0)
+    }
 
     return {
       key: item.instanceId,
@@ -108,7 +115,7 @@ export function toInventoryViewModel(item) {
       rarity: def.rarity,
       quantity: 1,
       equipped: !!item.equipped,
-      stats: def.stats || {},
+      stats: mergedStats,
       description: def.description || '',
       raw: item,
     }

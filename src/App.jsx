@@ -13,7 +13,10 @@ import AuthScreen from './components/AuthScreen'
 import LoginScreen from './components/LoginScreen'
 import DongPhuPanel from './components/DongPhuPanel'
 import ShopPanel from './components/ShopPanel'
+import MarketPanel from './components/MarketPanel'
 import CodePanel from './components/CodePanel'
+import WorldBossPanel from './components/WorldBossPanel'
+import WelfarePanel from './components/WelfarePanel'
 import { usePublicPlayers } from './hooks/usePublicPlayers'
 import './App.css'
 
@@ -195,6 +198,7 @@ export default function App() {
     breakthroughCost,
     logs,
     combatLogs,
+    welfare,
     activeTab,
     dungeon,
     finalStats,
@@ -273,8 +277,30 @@ export default function App() {
               <ShopPanel player={player} actions={actions} />
             )}
 
+            {activeTab === 'market' && (
+              <MarketPanel
+                player={player}
+                currentUid={user?.uid}
+                actions={actions}
+              />
+            )}
+
             {activeTab === 'codes' && (
-              <CodePanel player={player} actions={actions} isAdmin={isAdmin} />
+              <CodePanel
+                player={player}
+                actions={actions}
+                isAdmin={isAdmin}
+                latestMessage={message}
+              />
+            )}
+
+            {activeTab === 'welfare' && (
+              <WelfarePanel
+                player={player}
+                welfare={welfare}
+                actions={actions}
+                latestMessage={message}
+              />
             )}
 
             {activeTab === 'cultivation' && (
@@ -314,6 +340,14 @@ export default function App() {
                 actions={actions}
                 finalStats={finalStats}
                 combatLogs={combatLogs}
+              />
+            )}
+
+            {activeTab === 'world-boss' && (
+              <WorldBossPanel
+                player={player}
+                finalStats={finalStats}
+                actions={actions}
               />
             )}
 

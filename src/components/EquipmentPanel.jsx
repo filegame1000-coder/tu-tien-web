@@ -9,8 +9,8 @@ const slotLabels = {
 
 function formatStatLabel(key) {
   const labels = {
-    maxHp: 'HP',
-    maxMp: 'Ki',
+    maxHp: 'Sinh lực',
+    maxMp: 'Pháp lực',
     damage: 'Sát thương',
     defense: 'Phòng thủ',
     critChance: 'Bạo kích',
@@ -54,8 +54,19 @@ function formatStatValue(key, value) {
   return `+${value}`
 }
 
+function mergeStats(baseStats = {}, bonusStats = {}) {
+  const merged = { ...baseStats }
+
+  for (const [key, value] of Object.entries(bonusStats)) {
+    merged[key] = (merged[key] || 0) + (value || 0)
+  }
+
+  return merged
+}
+
 function formatStats(stats = {}) {
   return Object.entries(stats)
+    .filter(([, value]) => value)
     .map(([key, value]) => `${formatStatLabel(key)} ${formatStatValue(key, value)}`)
     .join(' • ')
 }
@@ -74,7 +85,11 @@ export default function EquipmentPanel({ player, finalStats, actions }) {
     const def = equipmentDefs[instance.defId]
     if (!def) return null
 
-    return { instance, def }
+    return {
+      instance,
+      def,
+      stats: mergeStats(def.stats || {}, instance.bonusStats || {}),
+    }
   }
 
   const equipableItems = inventory.filter((item) => {
@@ -105,7 +120,7 @@ export default function EquipmentPanel({ player, finalStats, actions }) {
                     <>
                       <strong>{item.def.name}</strong>
                       <span className="muted-text small">
-                        {formatStats(item.def.stats || {}) || 'Không có chỉ số'}
+                        {formatStats(item.stats) || 'Không có chỉ số'}
                       </span>
                       <button
                         className="dao-btn dao-btn-muted"
@@ -127,13 +142,13 @@ export default function EquipmentPanel({ player, finalStats, actions }) {
           <div className="mini-panel-title">Chỉ số cuối cùng</div>
           <div className="requirements-list compact-list">
             <div>
-              <span>HP</span>
+              <span>Sinh lực</span>
               <strong>
                 {player?.hp ?? 0}/{finalStats?.maxHp ?? 0}
               </strong>
             </div>
             <div>
-              <span>Ki</span>
+              <span>Pháp lực</span>
               <strong>
                 {player?.mp ?? 0}/{finalStats?.maxMp ?? 0}
               </strong>
@@ -160,6 +175,7 @@ export default function EquipmentPanel({ player, finalStats, actions }) {
         <div className="inventory-list">
           {equipableItems.map((item) => {
             const def = equipmentDefs[item.defId]
+            const stats = mergeStats(def.stats || {}, item.bonusStats || {})
 
             return (
               <div key={item.instanceId} className="inventory-card">
@@ -167,7 +183,7 @@ export default function EquipmentPanel({ player, finalStats, actions }) {
                   <strong>{def.name}</strong>
                   <div className="muted-text small">Ô: {slotLabels[def.slot] || def.slot}</div>
                   <div className="muted-text small">
-                    {formatStats(def.stats || {}) || 'Không có chỉ số'}
+                    {formatStats(stats) || 'Không có chỉ số'}
                   </div>
                 </div>
                 <button

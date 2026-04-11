@@ -37,7 +37,9 @@ export default function DongPhuPanel({ skills, actions }) {
                   <p className="inventory-description">{entry.def?.description}</p>
 
                   <div className="inventory-stat-list">
-                    <span className="inventory-stat-chip">Hao Ki: {entry.def?.manaCost}</span>
+                    <span className="inventory-stat-chip">
+                      Hao pháp lực: {entry.def?.manaCost}
+                    </span>
                     <span className="inventory-stat-chip">
                       Hồi chiêu: {entry.def?.cooldownTurns} lượt
                     </span>
@@ -82,7 +84,9 @@ export default function DongPhuPanel({ skills, actions }) {
                     <>
                       <p className="inventory-description">{entry.def.description}</p>
                       <div className="inventory-stat-list">
-                        <span className="inventory-stat-chip">Hao Ki: {entry.def.manaCost}</span>
+                        <span className="inventory-stat-chip">
+                          Hao pháp lực: {entry.def.manaCost}
+                        </span>
                         <span className="inventory-stat-chip">
                           Hồi chiêu: {entry.def.cooldownTurns} lượt
                         </span>

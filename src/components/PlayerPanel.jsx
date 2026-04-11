@@ -46,8 +46,8 @@ export default function PlayerPanel({ player, finalStats, actions, actionState }
 
       {showStats ? (
         <div className="info-group">
-          <InfoRow label="HP" value={`${currentHp}/${maxHp}`} emphasize />
-          <InfoRow label="Ki" value={`${currentMp}/${maxMp}`} />
+          <InfoRow label="Sinh lực" value={`${currentHp}/${maxHp}`} emphasize />
+          <InfoRow label="Pháp lực" value={`${currentMp}/${maxMp}`} />
           <InfoRow label="Sát thương" value={finalStats?.damage ?? 0} />
           <InfoRow label="Phòng thủ" value={finalStats?.defense ?? 0} />
           <InfoRow label="Linh thạch" value={player.spiritStones ?? 0} />
