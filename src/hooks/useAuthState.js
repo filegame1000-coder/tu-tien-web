@@ -1,12 +1,24 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
 } from 'firebase/auth'
-import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, getDoc, onSnapshot, serverTimestamp, setDoc } from 'firebase/firestore'
 import { auth, db } from '../firebase'
+
+const SESSION_KEY_PREFIX = 'huyen-thien-session'
+const ADMIN_EMAILS = ['trinhchibinh13x3@gmail.com']
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isAdminEmail(email) {
+  const normalized = normalizeEmail(email)
+  return ADMIN_EMAILS.includes(normalized)
+}
 
 function mapFirebaseError(error) {
   const code = error?.code || ''
@@ -24,6 +36,39 @@ function mapFirebaseError(error) {
   return error?.message || 'Đã có lỗi xảy ra.'
 }
 
+function getSessionStorageKey(uid) {
+  return `${SESSION_KEY_PREFIX}:${uid}`
+}
+
+function createSessionId() {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+
+  return `session_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function getOrCreateLocalSessionId(uid) {
+  if (!uid) return ''
+  if (typeof window === 'undefined' || !window.sessionStorage) {
+    return createSessionId()
+  }
+
+  const key = getSessionStorageKey(uid)
+  const existing = window.sessionStorage.getItem(key)
+  if (existing) return existing
+
+  const next = createSessionId()
+  window.sessionStorage.setItem(key, next)
+  return next
+}
+
+function clearLocalSessionId(uid) {
+  if (!uid) return
+  if (typeof window === 'undefined' || !window.sessionStorage) return
+  window.sessionStorage.removeItem(getSessionStorageKey(uid))
+}
+
 export function useAuthState() {
   const [user, setUser] = useState(null)
   const [ready, setReady] = useState(false)
@@ -34,18 +79,35 @@ export function useAuthState() {
   const [userProfile, setUserProfile] = useState(null)
   const [isAdmin, setIsAdmin] = useState(false)
 
+  const sessionWatcherRef = useRef(null)
+  const loginIntentRef = useRef(false)
+  const forcedLogoutRef = useRef(false)
+  const currentSessionRef = useRef({ uid: '', sessionId: '' })
+
+  function cleanupSessionWatcher() {
+    if (typeof sessionWatcherRef.current === 'function') {
+      sessionWatcherRef.current()
+    }
+    sessionWatcherRef.current = null
+  }
+
   async function ensureUserDoc(firebaseUser) {
     const ref = doc(db, 'users', firebaseUser.uid)
     const snap = await getDoc(ref)
+    const adminEmail = isAdminEmail(firebaseUser.email)
 
     if (!snap.exists()) {
       await setDoc(
         ref,
         {
           email: firebaseUser.email || '',
-          role: 'player',
+          role: adminEmail ? 'admin' : 'player',
           profile: {
             displayName: '',
+          },
+          session: {
+            activeSessionId: '',
+            updatedAtMs: 0,
           },
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
@@ -53,7 +115,127 @@ export function useAuthState() {
         },
         { merge: true }
       )
+      return
     }
+
+    if (adminEmail && String(snap.data()?.role || 'player') !== 'admin') {
+      await setDoc(
+        ref,
+        {
+          email: firebaseUser.email || '',
+          role: 'admin',
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      )
+    }
+  }
+
+  async function activateSession(firebaseUser, allowTakeover = false) {
+    const uid = firebaseUser?.uid
+    if (!uid) return { ok: false, reason: 'missing-user' }
+
+    const ref = doc(db, 'users', uid)
+    const snap = await getDoc(ref)
+    const localSessionId = getOrCreateLocalSessionId(uid)
+    const remoteSessionId = String(snap.data()?.session?.activeSessionId || '')
+
+    if (remoteSessionId && remoteSessionId !== localSessionId && !allowTakeover) {
+      return { ok: false, reason: 'already-active-elsewhere' }
+    }
+
+    await setDoc(
+      ref,
+      {
+        updatedAt: serverTimestamp(),
+        session: {
+          activeSessionId: localSessionId,
+          updatedAtMs: Date.now(),
+        },
+      },
+      { merge: true }
+    )
+
+    currentSessionRef.current = {
+      uid,
+      sessionId: localSessionId,
+    }
+
+    return { ok: true, sessionId: localSessionId }
+  }
+
+  async function releaseSession(firebaseUser) {
+    const uid = firebaseUser?.uid || currentSessionRef.current.uid
+    const sessionId = currentSessionRef.current.sessionId
+
+    cleanupSessionWatcher()
+
+    if (!uid) {
+      currentSessionRef.current = { uid: '', sessionId: '' }
+      return
+    }
+
+    try {
+      const ref = doc(db, 'users', uid)
+      const snap = await getDoc(ref)
+      const remoteSessionId = String(snap.data()?.session?.activeSessionId || '')
+
+      if (sessionId && remoteSessionId === sessionId) {
+        await setDoc(
+          ref,
+          {
+            updatedAt: serverTimestamp(),
+            session: {
+              activeSessionId: '',
+              updatedAtMs: Date.now(),
+            },
+          },
+          { merge: true }
+        )
+      }
+    } catch (error) {
+      console.error('Release session error:', error)
+    } finally {
+      clearLocalSessionId(uid)
+      currentSessionRef.current = { uid: '', sessionId: '' }
+    }
+  }
+
+  function startSessionWatcher(firebaseUser) {
+    const uid = firebaseUser?.uid
+    if (!uid) return
+
+    cleanupSessionWatcher()
+
+    const ref = doc(db, 'users', uid)
+    const localSessionId = currentSessionRef.current.sessionId || getOrCreateLocalSessionId(uid)
+
+    sessionWatcherRef.current = onSnapshot(
+      ref,
+      (snap) => {
+        const data = snap.exists() ? snap.data() : null
+        setUserProfile(data)
+        setIsAdmin(data?.role === 'admin' || isAdminEmail(firebaseUser?.email))
+
+        const remoteSessionId = String(data?.session?.activeSessionId || '')
+        if (!remoteSessionId || remoteSessionId === localSessionId) return
+        if (forcedLogoutRef.current) return
+
+        forcedLogoutRef.current = true
+        setMessage('Tài khoản này đã đăng nhập ở nơi khác, bạn đã bị đăng xuất.')
+
+        signOut(auth)
+          .catch((error) => {
+            console.error('Forced sign-out error:', error)
+          })
+          .finally(() => {
+            forcedLogoutRef.current = false
+          })
+      },
+      (error) => {
+        console.error('Session watcher error:', error)
+      }
+    )
   }
 
   async function loadUserMeta(firebaseUser) {
@@ -66,7 +248,7 @@ export function useAuthState() {
     const snap = await getDoc(doc(db, 'users', firebaseUser.uid))
     const data = snap.exists() ? snap.data() : null
     setUserProfile(data)
-    setIsAdmin(data?.role === 'admin')
+    setIsAdmin(data?.role === 'admin' || isAdminEmail(firebaseUser?.email))
   }
 
   useEffect(() => {
@@ -74,25 +256,43 @@ export function useAuthState() {
       setUser(firebaseUser || null)
 
       if (!firebaseUser) {
+        cleanupSessionWatcher()
         setUserProfile(null)
         setIsAdmin(false)
+        currentSessionRef.current = { uid: '', sessionId: '' }
         setReady(true)
         return
       }
 
       try {
         await ensureUserDoc(firebaseUser)
+
+        const sessionResult = await activateSession(firebaseUser, loginIntentRef.current)
+
+        if (!sessionResult.ok) {
+          setMessage(
+            'Tài khoản này đang hoạt động ở nơi khác. Hãy đăng nhập lại để tiếp quản phiên cũ.'
+          )
+          clearLocalSessionId(firebaseUser.uid)
+          await signOut(auth)
+          return
+        }
+
+        startSessionWatcher(firebaseUser)
         await loadUserMeta(firebaseUser)
       } catch (error) {
         console.error('Load user meta error:', error)
         setUserProfile(null)
         setIsAdmin(false)
+        setMessage('Không thể đồng bộ phiên đăng nhập.')
       } finally {
+        loginIntentRef.current = false
         setReady(true)
       }
     })
 
     return () => {
+      cleanupSessionWatcher()
       if (typeof unsub === 'function') unsub()
     }
   }, [])
@@ -106,13 +306,12 @@ export function useAuthState() {
     try {
       setLoading(true)
       setMessage('')
+      loginIntentRef.current = true
 
-      const result = await createUserWithEmailAndPassword(auth, email, password)
-      await ensureUserDoc(result.user)
-      await loadUserMeta(result.user)
-
+      await createUserWithEmailAndPassword(auth, email, password)
       setMessage('Đăng ký thành công.')
     } catch (error) {
+      loginIntentRef.current = false
       setMessage(mapFirebaseError(error))
     } finally {
       setLoading(false)
@@ -128,13 +327,12 @@ export function useAuthState() {
     try {
       setLoading(true)
       setMessage('')
+      loginIntentRef.current = true
 
-      const result = await signInWithEmailAndPassword(auth, email, password)
-      await ensureUserDoc(result.user)
-      await loadUserMeta(result.user)
-
+      await signInWithEmailAndPassword(auth, email, password)
       setMessage('Đăng nhập thành công.')
     } catch (error) {
+      loginIntentRef.current = false
       setMessage(mapFirebaseError(error))
     } finally {
       setLoading(false)
@@ -144,6 +342,7 @@ export function useAuthState() {
   async function handleLogout() {
     try {
       setLoading(true)
+      await releaseSession(auth.currentUser)
       await signOut(auth)
       setEmail('')
       setPassword('')

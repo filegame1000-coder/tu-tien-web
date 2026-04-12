@@ -13,6 +13,14 @@ service cloud.firestore {
         && profile.displayName.size() <= 40;
     }
 
+    function validSession(session) {
+      return session is map
+        && session.keys().hasOnly(['activeSessionId', 'updatedAtMs'])
+        && session.activeSessionId is string
+        && session.activeSessionId.size() <= 120
+        && session.updatedAtMs is number;
+    }
+
     match /users/{uid} {
       allow read: if isOwner(uid);
 
@@ -21,6 +29,7 @@ service cloud.firestore {
           'email',
           'role',
           'profile',
+          'session',
           'createdAt',
           'updatedAt',
           'saveData'
@@ -28,6 +37,7 @@ service cloud.firestore {
         && request.resource.data.email is string
         && request.resource.data.role == 'player'
         && validProfile(request.resource.data.profile)
+        && validSession(request.resource.data.session)
         && request.resource.data.saveData == null;
 
       allow update: if isOwner(uid)
@@ -35,19 +45,22 @@ service cloud.firestore {
           'email',
           'role',
           'profile',
+          'session',
           'createdAt',
           'updatedAt',
           'saveData'
         ])
         && request.resource.data.diff(resource.data).changedKeys().hasOnly([
           'profile',
+          'session',
           'updatedAt'
         ])
         && request.resource.data.email == resource.data.email
         && request.resource.data.role == resource.data.role
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.saveData == resource.data.saveData
-        && validProfile(request.resource.data.profile);
+        && validProfile(request.resource.data.profile)
+        && validSession(request.resource.data.session);
 
       allow delete: if false;
     }

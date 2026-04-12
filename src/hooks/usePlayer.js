@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { doc, getDoc } from 'firebase/firestore'
 import { loadGame, saveGame } from '../utils/save'
 import {
   cultivateAction,
@@ -21,6 +20,9 @@ import {
   deleteRewardCodeAction,
   listRewardCodesAction,
   updateRewardCodeAction,
+  listAuditLogsAction,
+  listAdminPlayersAction,
+  getAdminPlayerDetailAction,
   upgradeHerbGardenAction,
   plantHerbSeedAction,
   harvestHerbSlotAction,
@@ -31,12 +33,12 @@ import {
   attackWorldBossAction,
   quickReviveWorldBossAction,
   claimWorldBossRankingRewardAction,
+  fetchPlayerStateAction,
   fetchWelfareStateAction,
   claimLoginRewardAction,
   claimDailyMissionRewardAction,
   claimDailyActivityRewardAction,
 } from '../services/gameApi'
-import { db } from '../firebase'
 
 import { createPlayer, setInitialPlayerName } from '../systems/player'
 
@@ -119,15 +121,6 @@ function buildDefaultSave() {
   return normalizeSaveData({}) || {}
 }
 
-async function loadCloudSave(uid) {
-  if (!uid) return null
-
-  const snap = await getDoc(doc(db, 'users', uid))
-  if (!snap.exists()) return null
-
-  return normalizeSaveData(snap.data()?.saveData)
-}
-
 export function usePlayer(user) {
   const saved = useMemo(() => {
     return normalizeSaveData(loadGame(user?.uid)) || buildDefaultSave()
@@ -170,6 +163,8 @@ export function usePlayer(user) {
   const actionInFlightRef = useRef(false)
   const alchemyClaimInFlightRef = useRef(false)
   const publicSyncRef = useRef('')
+  const authoritativeSyncPromiseRef = useRef(null)
+  const authoritativeSyncTimeoutRef = useRef(null)
   const allowDevFallback = import.meta.env.DEV
 
   const finalStats = useMemo(() => getFinalStats(player), [player])
@@ -189,6 +184,22 @@ export function usePlayer(user) {
   function pushLog(text) {
     setLogs((prev) => [text, ...prev].slice(0, 20))
     setMessage(text)
+  }
+
+  function clearScheduledAuthoritativeSync() {
+    if (!authoritativeSyncTimeoutRef.current) return
+    clearTimeout(authoritativeSyncTimeoutRef.current)
+    authoritativeSyncTimeoutRef.current = null
+  }
+
+  function scheduleAuthoritativeRefresh(delayMs = 800) {
+    if (!user?.uid) return
+
+    clearScheduledAuthoritativeSync()
+    authoritativeSyncTimeoutRef.current = setTimeout(() => {
+      authoritativeSyncTimeoutRef.current = null
+      void handleRefreshPlayerState({ silent: true, preserveActiveTab: true })
+    }, delayMs)
   }
 
   function applyLocalWelfareProgress(progressPatch) {
@@ -241,9 +252,13 @@ export function usePlayer(user) {
     if (Object.prototype.hasOwnProperty.call(result, 'welfare')) {
       setWelfare(normalizeWelfareState(result.welfare))
     }
+
+    scheduleAuthoritativeRefresh()
   }
 
-  function applyLoadedSave(nextSaved) {
+  function applyLoadedSave(nextSaved, options = {}) {
+    const preserveActiveTab = options.preserveActiveTab ?? false
+
     setPlayer(normalizePlayerSkills(nextSaved.player || createPlayer()))
     setCrafting(nextSaved.crafting ?? null)
     setCraftingRemainMs(getAlchemyRemainingMs(nextSaved.crafting ?? null))
@@ -258,13 +273,58 @@ export function usePlayer(user) {
         : ['Báº¯t Ä‘áº§u con Ä‘Æ°á»ng tu luyá»‡n.']
     )
 
-    setActiveTab(nextSaved.activeTab || 'cultivation')
+    if (!preserveActiveTab) {
+      setActiveTab(nextSaved.activeTab || 'cultivation')
+    }
     setCurrentDungeonFloor(nextSaved.currentDungeonFloor ?? null)
     setCurrentEnemy(nextSaved.currentEnemy ?? null)
     setKillCount(nextSaved.killCount ?? 0)
     setDungeonCooldownUntil(nextSaved.dungeonCooldownUntil ?? null)
     setWelfare(normalizeWelfareState(nextSaved.welfare || createDefaultWelfareState()))
     replaceCombatLog(nextSaved.combatLogs ?? [])
+  }
+
+  async function handleRefreshPlayerState({
+    silent = false,
+    preserveActiveTab = true,
+  } = {}) {
+    if (!user?.uid) return null
+
+    if (authoritativeSyncPromiseRef.current) {
+      return authoritativeSyncPromiseRef.current
+    }
+
+    const syncPromise = (async () => {
+      try {
+        const result = await fetchPlayerStateAction()
+        const nextSaved = normalizeSaveData(result?.saveData)
+
+        if (!result?.ok || !nextSaved) {
+          if (!silent) {
+            pushLog('Khong tai duoc du lieu nhan vat tu may chu.')
+          }
+          return null
+        }
+
+        applyLoadedSave(nextSaved, { preserveActiveTab })
+        saveGame(
+          preserveActiveTab ? { ...nextSaved, activeTab } : nextSaved,
+          user.uid
+        )
+        return result
+      } catch (error) {
+        console.error('Authoritative player sync error:', error)
+        if (!silent) {
+          pushLog('Khong dong bo duoc du lieu nhan vat tu may chu.')
+        }
+        return null
+      } finally {
+        authoritativeSyncPromiseRef.current = null
+      }
+    })()
+
+    authoritativeSyncPromiseRef.current = syncPromise
+    return syncPromise
   }
 
   useEffect(() => {
@@ -294,6 +354,8 @@ export function usePlayer(user) {
     setPendingAction(null)
     actionInFlightRef.current = false
     alchemyClaimInFlightRef.current = false
+    authoritativeSyncPromiseRef.current = null
+    clearScheduledAuthoritativeSync()
   }, [user?.uid, replaceCombatLog])
 
   useEffect(() => {
@@ -311,13 +373,13 @@ export function usePlayer(user) {
 
     ;(async () => {
       try {
-        const cloudSave = await loadCloudSave(user.uid)
+        const result = await handleRefreshPlayerState({
+          silent: true,
+          preserveActiveTab: false,
+        })
         if (!active) return
 
-        if (cloudSave) {
-          applyLoadedSave(cloudSave)
-          saveGame(cloudSave, user.uid)
-        }
+        if (!result?.ok) return
       } catch (error) {
         console.error('Cloud save hydrate error:', error)
       } finally {
@@ -329,6 +391,24 @@ export function usePlayer(user) {
       active = false
     }
   }, [user?.uid, replaceCombatLog])
+
+  useEffect(() => {
+    if (!user?.uid) return undefined
+
+    const handleFocusSync = () => {
+      if (document.visibilityState === 'visible') {
+        scheduleAuthoritativeRefresh(150)
+      }
+    }
+
+    window.addEventListener('focus', handleFocusSync)
+    document.addEventListener('visibilitychange', handleFocusSync)
+
+    return () => {
+      window.removeEventListener('focus', handleFocusSync)
+      document.removeEventListener('visibilitychange', handleFocusSync)
+    }
+  }, [user?.uid])
 
   useEffect(() => {
     if (!user?.uid) return
@@ -1185,6 +1265,54 @@ export function usePlayer(user) {
     }
   }
 
+  async function handleListAuditLogs(category = 'all', limit = 50) {
+    if (!user) {
+      pushLog('Hay dang nhap tai khoan admin de xem nhat ky he thong.')
+      return []
+    }
+
+    try {
+      const result = await listAuditLogsAction(category, limit)
+      return Array.isArray(result?.logs) ? result.logs : []
+    } catch (error) {
+      console.error('List audit logs error:', error)
+      pushLog('Khong tai duoc nhat ky he thong.')
+      return []
+    }
+  }
+
+  async function handleListAdminPlayers(keyword = '', limit = 50) {
+    if (!user) {
+      pushLog('Hay dang nhap tai khoan admin de xem danh sach nguoi choi.')
+      return []
+    }
+
+    try {
+      const result = await listAdminPlayersAction(keyword, limit)
+      return Array.isArray(result?.players) ? result.players : []
+    } catch (error) {
+      console.error('List admin players error:', error)
+      pushLog('Khong tai duoc danh sach nguoi choi.')
+      return []
+    }
+  }
+
+  async function handleGetAdminPlayerDetail(targetUid) {
+    if (!user) {
+      pushLog('Hay dang nhap tai khoan admin de xem ho so nguoi choi.')
+      return null
+    }
+
+    try {
+      const result = await getAdminPlayerDetailAction(targetUid)
+      return result?.ok ? result.player || null : null
+    } catch (error) {
+      console.error('Get admin player detail error:', error)
+      pushLog('Khong tai duoc ho so nguoi choi nay.')
+      return null
+    }
+  }
+
   async function handleUnequipItem(slot) {
     if (!user) {
       setPlayer((prev) => {
@@ -1557,6 +1685,7 @@ export function usePlayer(user) {
     clearCombatLog,
     replaceCombatLog,
     applyServerActionResult,
+    scheduleAuthoritativeRefresh,
     dungeonState,
   })
 
@@ -1606,6 +1735,7 @@ export function usePlayer(user) {
       attackWorldBoss: handleAttackWorldBoss,
       claimWorldBossRankingReward: handleClaimWorldBossRankingReward,
       quickReviveWorldBoss: handleQuickReviveWorldBoss,
+      refreshPlayerState: handleRefreshPlayerState,
       fetchWelfareState: handleFetchWelfareState,
       claimLoginReward: handleClaimLoginReward,
       claimDailyMissionReward: handleClaimDailyMissionReward,
@@ -1615,6 +1745,9 @@ export function usePlayer(user) {
       deleteRewardCode: handleDeleteRewardCode,
       listRewardCodes: handleListRewardCodes,
       updateRewardCode: handleUpdateRewardCode,
+      listAuditLogs: handleListAuditLogs,
+      listAdminPlayers: handleListAdminPlayers,
+      getAdminPlayerDetail: handleGetAdminPlayerDetail,
       equipSkill: handleEquipSkill,
       unequipSkill: handleUnequipSkill,
       equipItem: handleEquipItem,

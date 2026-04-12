@@ -43,6 +43,7 @@ export function useDungeonCombat({
   clearCombatLog,
   replaceCombatLog,
   applyServerActionResult,
+  scheduleAuthoritativeRefresh,
   dungeonState,
 }) {
   const allowDevFallback = import.meta.env.DEV
@@ -307,6 +308,7 @@ export function useDungeonCombat({
         return false
       }
 
+      scheduleAuthoritativeRefresh?.(1000)
       setActiveTab('dungeon')
       return true
     } catch (error) {
@@ -332,6 +334,7 @@ export function useDungeonCombat({
         return false
       }
 
+      scheduleAuthoritativeRefresh?.(1000)
       return true
     } catch (error) {
       console.error('Leave dungeon sync error:', error)
@@ -366,6 +369,7 @@ export function useDungeonCombat({
         return false
       }
 
+      scheduleAuthoritativeRefresh?.(1000)
       return true
     } catch (error) {
       console.error('Attack dungeon sync error:', error)

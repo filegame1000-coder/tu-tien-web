@@ -61,7 +61,7 @@ export default function LoginScreen({
 
           <div className="dao-auth-note">
             {mode === 'login'
-              ? 'Đăng nhập để tiếp tục nhân vật đang chơi.'
+              ? 'Mỗi tài khoản chỉ được hoạt động ở một nơi. Đăng nhập ở chỗ mới sẽ tiếp quản phiên cũ.'
               : 'Mỗi tài khoản sẽ có save riêng trên cloud.'}
           </div>
 

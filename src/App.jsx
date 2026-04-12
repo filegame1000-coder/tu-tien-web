@@ -17,6 +17,7 @@ import MarketPanel from './components/MarketPanel'
 import CodePanel from './components/CodePanel'
 import WorldBossPanel from './components/WorldBossPanel'
 import WelfarePanel from './components/WelfarePanel'
+import AdminPanel from './components/AdminPanel'
 import { usePublicPlayers } from './hooks/usePublicPlayers'
 import './App.css'
 
@@ -256,7 +257,7 @@ export default function App() {
           </button>
         </header>
 
-        <GameTabs activeTab={activeTab} onChange={actions.setActiveTab} />
+        <GameTabs activeTab={activeTab} onChange={actions.setActiveTab} isAdmin={isAdmin} />
 
         <div className="dao-layout">
           <aside className="left-column">
@@ -269,6 +270,10 @@ export default function App() {
           </aside>
 
           <main className="right-column">
+            {activeTab === 'admin' && isAdmin && (
+              <AdminPanel actions={actions} latestMessage={message} />
+            )}
+
             {activeTab === 'dong-phu' && (
               <DongPhuPanel skills={skills} actions={actions} />
             )}

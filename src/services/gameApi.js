@@ -210,6 +210,39 @@ export async function updateRewardCodeAction(payload) {
   }
 }
 
+export async function listAuditLogsAction(category = 'all', limit = 50) {
+  try {
+    const fn = httpsCallable(functions, 'listAuditLogsAction')
+    const res = await fn({ category, limit })
+    return res.data
+  } catch (error) {
+    console.error('listAuditLogsAction error:', error)
+    throw error
+  }
+}
+
+export async function listAdminPlayersAction(keyword = '', limit = 50) {
+  try {
+    const fn = httpsCallable(functions, 'listAdminPlayersAction')
+    const res = await fn({ keyword, limit })
+    return res.data
+  } catch (error) {
+    console.error('listAdminPlayersAction error:', error)
+    throw error
+  }
+}
+
+export async function getAdminPlayerDetailAction(targetUid) {
+  try {
+    const fn = httpsCallable(functions, 'getAdminPlayerDetailAction')
+    const res = await fn({ targetUid })
+    return res.data
+  } catch (error) {
+    console.error('getAdminPlayerDetailAction error:', error)
+    throw error
+  }
+}
+
 export async function enterDungeonAction(floor) {
   try {
     const fn = httpsCallable(functions, 'enterDungeonAction')
@@ -349,6 +382,17 @@ export async function claimWorldBossRankingRewardAction() {
     return res.data
   } catch (error) {
     console.error('claimWorldBossRankingRewardAction error:', error)
+    throw error
+  }
+}
+
+export async function fetchPlayerStateAction() {
+  try {
+    const fn = httpsCallable(functions, 'fetchPlayerStateAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('fetchPlayerStateAction error:', error)
     throw error
   }
 }

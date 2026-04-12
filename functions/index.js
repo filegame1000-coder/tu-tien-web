@@ -5,6 +5,25 @@ import { FieldValue, getFirestore } from 'firebase-admin/firestore'
 initializeApp()
 
 const db = getFirestore()
+const ADMIN_EMAILS = ['trinhchibinh13x3@gmail.com']
+
+function normalizeEmail(value) {
+  return String(value || '').trim().toLowerCase()
+}
+
+function isAdminEmail(email) {
+  const normalized = normalizeEmail(email)
+  return ADMIN_EMAILS.includes(normalized)
+}
+
+function timestampToMs(value) {
+  if (!value) return 0
+  if (typeof value?.toMillis === 'function') {
+    return value.toMillis()
+  }
+  const asNumber = Number(value)
+  return Number.isFinite(asNumber) ? asNumber : 0
+}
 
 const REALM_MORTAL = 'Phàm Nhân'
 const REALM_QI = 'Luyện Khí'
@@ -1399,10 +1418,40 @@ function describeRewardPayload(rawReward) {
 
 async function assertAdmin(uid) {
   const snap = await db.collection('users').doc(uid).get()
+  const data = snap.data() || {}
   const role = String(snap.data()?.role || 'player')
+  const email = data?.email || ''
 
-  if (role !== 'admin') {
+  if (role !== 'admin' && !isAdminEmail(email)) {
     throw new HttpsError('permission-denied', 'Chi admin moi duoc thuc hien thao tac nay.')
+  }
+}
+
+function getAuditActorName(player, fallback = 'Vo Danh') {
+  return normalizePlayerName(player?.name || fallback) || 'Vo Danh'
+}
+
+async function writeAuditLog(entry = {}) {
+  try {
+    const now = Date.now()
+    await db.collection('auditLogs').doc().set(
+      {
+        action: String(entry.action || 'system.unknown'),
+        category: String(entry.category || 'system'),
+        actorUid: String(entry.actorUid || ''),
+        actorName: String(entry.actorName || 'Vo Danh'),
+        targetUid: String(entry.targetUid || ''),
+        targetName: String(entry.targetName || ''),
+        summary: String(entry.summary || ''),
+        details:
+          entry.details && typeof entry.details === 'object' ? entry.details : {},
+        createdAtMs: now,
+        createdAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    )
+  } catch (error) {
+    console.error('writeAuditLog error:', error)
   }
 }
 
@@ -3048,7 +3097,7 @@ export const createMarketListingAction = onCall(
     }
 
     try {
-      return await runPlayerAction(uid, (saveData, context) => {
+      const result = await runPlayerAction(uid, (saveData, context) => {
         const inventoryItem = getInventoryItemByInstanceId(
           saveData.player?.inventory || [],
           instanceId
@@ -3121,6 +3170,22 @@ export const createMarketListingAction = onCall(
           message: `Da dang ban ${EQUIPMENT_DEFS[inventoryItem.defId].name} voi gia ${price} linh thach.`,
         }
       })
+
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'market.listing.create',
+          category: 'market',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player),
+          summary: result.message,
+          details: {
+            instanceId,
+            price,
+          },
+        })
+      }
+
+      return result
     } catch (error) {
       console.error('createMarketListingAction error:', error)
       throw new HttpsError(
@@ -3146,7 +3211,7 @@ export const cancelMarketListingAction = onCall(
     }
 
     try {
-      return await runPlayerAction(uid, async (saveData, context) => {
+      const result = await runPlayerAction(uid, async (saveData, context) => {
         const listingRef = db.collection('marketListings').doc(listingId)
         const listingSnap = await context.transaction.get(listingRef)
 
@@ -3204,6 +3269,21 @@ export const cancelMarketListingAction = onCall(
           message: `Da go ${EQUIPMENT_DEFS[listing.item.defId]?.name || 'trang bi'} khoi cho giao dich.`,
         }
       })
+
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'market.listing.cancel',
+          category: 'market',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player),
+          summary: result.message,
+          details: {
+            listingId,
+          },
+        })
+      }
+
+      return result
     } catch (error) {
       console.error('cancelMarketListingAction error:', error)
       throw new HttpsError(
@@ -3350,6 +3430,19 @@ export const buyMarketListingAction = onCall(
           message: buyerPayload.message,
         }
       })
+
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'market.listing.buy',
+          category: 'market',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player),
+          summary: result.message,
+          details: {
+            listingId,
+          },
+        })
+      }
 
       return result
     } catch (error) {
@@ -3676,6 +3769,26 @@ export const attackWorldBossAction = onCall(
         }
       })
 
+      if (result?.ok && result?.message) {
+        const bossKilled =
+          typeof result.message === 'string' &&
+          result.message.includes('Ban ket lieu')
+
+        if (bossKilled) {
+          await writeAuditLog({
+            action: 'boss.kill',
+            category: 'boss',
+            actorUid: uid,
+            actorName: getAuditActorName(result.player),
+            summary: result.message,
+            details: {
+              bossName: String(result?.boss?.name || WORLD_BOSS_NAME),
+              cycleId: Number(result?.boss?.cycleId || 0),
+            },
+          })
+        }
+      }
+
       return result
     } catch (error) {
       console.error('attackWorldBossAction error:', error)
@@ -3802,6 +3915,21 @@ export const quickReviveWorldBossAction = onCall(
         }
       })
 
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'boss.quick_revive',
+          category: 'boss',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player),
+          summary: result.message,
+          details: {
+            bossName: String(result?.boss?.name || WORLD_BOSS_NAME),
+            cost: WORLD_BOSS_QUICK_REVIVE_COST,
+            cycleId: Number(result?.boss?.cycleId || 0),
+          },
+        })
+      }
+
       return result
     } catch (error) {
       console.error('quickReviveWorldBossAction error:', error)
@@ -3919,12 +4047,55 @@ export const claimWorldBossRankingRewardAction = onCall(
         }
       })
 
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'boss.ranking_reward.claim',
+          category: 'boss',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player),
+          summary: result.message,
+          details: {
+            rank: Number(result?.rankingReward?.rank || 0),
+            reward: Number(result?.rankingReward?.reward || 0),
+            cycleId: Number(result?.boss?.lastFinishedCycleId || 0),
+          },
+        })
+      }
+
       return result
     } catch (error) {
       console.error('claimWorldBossRankingRewardAction error:', error)
       throw new HttpsError(
         'internal',
         error?.message || 'Loi server khi nhan thuong top sat thuong boss.'
+      )
+    }
+  }
+)
+
+export const fetchPlayerStateAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      const snap = await db.collection('users').doc(uid).get()
+      const data = snap.exists ? snap.data() : {}
+      const saveData = normalizeSaveData(data?.saveData)
+
+      return {
+        ok: true,
+        saveData,
+      }
+    } catch (error) {
+      console.error('fetchPlayerStateAction error:', error)
+      throw new HttpsError(
+        'internal',
+        error?.message || 'Loi server khi tai du lieu nhan vat.'
       )
     }
   }
@@ -3969,7 +4140,7 @@ export const claimLoginRewardAction = onCall(
     }
 
     try {
-      return await runPlayerAction(uid, (saveData, context) => {
+      const result = await runPlayerAction(uid, (saveData, context) => {
         const now = context.now
         const welfare = normalizeWelfareState(saveData.welfare, now)
         const todaySerial = getVnDaySerial(now)
@@ -4017,6 +4188,18 @@ export const claimLoginRewardAction = onCall(
           message: `Da nhan qua ngay ${claimDay}: ${describeRewardPayload(reward)}.`,
         }
       })
+
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'welfare.login_reward.claim',
+          category: 'welfare',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player),
+          summary: result.message,
+        })
+      }
+
+      return result
     } catch (error) {
       console.error('claimLoginRewardAction error:', error)
       throw new HttpsError(
@@ -4042,7 +4225,7 @@ export const claimDailyMissionRewardAction = onCall(
     }
 
     try {
-      return await runPlayerAction(uid, (saveData, context) => {
+      const result = await runPlayerAction(uid, (saveData, context) => {
         const mission = DAILY_MISSION_MAP[missionId]
         const welfare = normalizeWelfareState(saveData.welfare, context.now)
         const progress = Number(welfare.missionProgress?.[missionId]) || 0
@@ -4101,6 +4284,21 @@ export const claimDailyMissionRewardAction = onCall(
           message: `Da nhan thuong nhiem vu "${mission.title}": ${describeRewardPayload(reward)}.`,
         }
       })
+
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'welfare.daily_mission.claim',
+          category: 'welfare',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player),
+          summary: result.message,
+          details: {
+            missionId,
+          },
+        })
+      }
+
+      return result
     } catch (error) {
       console.error('claimDailyMissionRewardAction error:', error)
       throw new HttpsError(
@@ -4127,7 +4325,7 @@ export const claimDailyActivityRewardAction = onCall(
     }
 
     try {
-      return await runPlayerAction(uid, (saveData, context) => {
+      const result = await runPlayerAction(uid, (saveData, context) => {
         const welfare = normalizeWelfareState(saveData.welfare, context.now)
         const points = getDailyActivityPoints(welfare, context.now)
 
@@ -4185,6 +4383,21 @@ export const claimDailyActivityRewardAction = onCall(
           message: `Da nhan thuong moc ${threshold} diem: ${describeRewardPayload(reward)}.`,
         }
       })
+
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'welfare.activity_reward.claim',
+          category: 'welfare',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player),
+          summary: result.message,
+          details: {
+            threshold,
+          },
+        })
+      }
+
+      return result
     } catch (error) {
       console.error('claimDailyActivityRewardAction error:', error)
       throw new HttpsError(
@@ -4210,7 +4423,7 @@ export const redeemRewardCodeAction = onCall(
     }
 
     try {
-      return await runPlayerAction(uid, async (saveData, context) => {
+      const result = await runPlayerAction(uid, async (saveData, context) => {
         const codeRef = db.collection('giftCodes').doc(code)
         const claimRef = codeRef.collection('claims').doc(uid)
         const codeSnap = await context.transaction.get(codeRef)
@@ -4305,6 +4518,21 @@ export const redeemRewardCodeAction = onCall(
           message: `Da nhan code ${code} thanh cong.`,
         }
       })
+
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'code.redeem',
+          category: 'code',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player),
+          summary: result.message,
+          details: {
+            code,
+          },
+        })
+      }
+
+      return result
     } catch (error) {
       console.error('redeemRewardCodeAction error:', error)
       throw new HttpsError(
@@ -4371,6 +4599,20 @@ export const createRewardCodeAction = onCall(
         throw new HttpsError('already-exists', 'Khong the tao code moi, vui long thu lai.')
       }
 
+      await writeAuditLog({
+        action: 'code.create',
+        category: 'code',
+        actorUid: uid,
+        actorName: 'Admin',
+        summary: `Da tao code ${finalCode}.`,
+        details: {
+          code: finalCode,
+          maxUses,
+          note,
+          reward,
+        },
+      })
+
       return {
         ok: true,
         code: finalCode,
@@ -4422,6 +4664,17 @@ export const deleteRewardCodeAction = onCall(
         },
         { merge: true }
       )
+
+      await writeAuditLog({
+        action: 'code.delete',
+        category: 'code',
+        actorUid: uid,
+        actorName: 'Admin',
+        summary: `Da khoa code ${code}.`,
+        details: {
+          code,
+        },
+      })
 
       return {
         ok: true,
@@ -4477,6 +4730,213 @@ export const listRewardCodesAction = onCall(
       throw new HttpsError(
         error?.code || 'internal',
         error?.message || 'Loi server khi tai danh sach code.'
+      )
+    }
+  }
+)
+
+export const listAuditLogsAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const category = String(request.data?.category || '').trim().toLowerCase()
+    const limit = Math.min(100, Math.max(1, Number(request.data?.limit) || 50))
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    await assertAdmin(uid)
+
+    try {
+      const snap = await db
+        .collection('auditLogs')
+        .orderBy('createdAtMs', 'desc')
+        .limit(Math.max(limit, 100))
+        .get()
+
+      const logs = snap.docs
+        .map((logDoc) => {
+        const data = logDoc.data() || {}
+        return {
+          id: logDoc.id,
+          action: String(data.action || ''),
+          category: String(data.category || 'system'),
+          actorUid: String(data.actorUid || ''),
+          actorName: String(data.actorName || 'Vo Danh'),
+          targetUid: String(data.targetUid || ''),
+          targetName: String(data.targetName || ''),
+          summary: String(data.summary || ''),
+          details: data.details && typeof data.details === 'object' ? data.details : {},
+          createdAtMs: Number(data.createdAtMs) || 0,
+        }
+        })
+        .filter((item) => category === 'all' || !category || item.category === category)
+        .slice(0, limit)
+
+      return {
+        ok: true,
+        logs,
+      }
+    } catch (error) {
+      console.error('listAuditLogsAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi tai nhat ky he thong.'
+      )
+    }
+  }
+)
+
+export const listAdminPlayersAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const keyword = String(request.data?.keyword || '').trim().toLowerCase()
+    const limit = Math.min(100, Math.max(1, Number(request.data?.limit) || 50))
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    await assertAdmin(uid)
+
+    try {
+      const snap = await db.collection('users').limit(Math.max(limit, 100)).get()
+      const players = snap.docs
+        .map((playerDoc) => {
+          const data = playerDoc.data() || {}
+          const saveData = normalizeSaveData(data?.saveData)
+          const finalStats = getFinalStats(saveData.player)
+          const email = String(data?.email || '')
+          const name = getAuditActorName(
+            saveData.player,
+            data?.profile?.displayName || 'Vo Danh'
+          )
+
+          return {
+            uid: playerDoc.id,
+            email,
+            role: String(data?.role || 'player'),
+            name,
+            realm: normalizeRealm(saveData.player?.realm),
+            stage: Number(saveData.player?.stage) || 1,
+            exp: Number(saveData.player?.exp) || 0,
+            power: getPowerScore(saveData.player),
+            spiritStones: Number(saveData.player?.spiritStones) || 0,
+            herbs: Number(saveData.player?.herbs) || 0,
+            hp: Number(saveData.player?.hp) || 0,
+            maxHp: Number(finalStats?.maxHp) || 0,
+            damage: Number(finalStats?.damage) || 0,
+            defense: Number(finalStats?.defense) || 0,
+            inventoryCount: Array.isArray(saveData.player?.inventory)
+              ? saveData.player.inventory.length
+              : 0,
+            learnedSkillCount: Array.isArray(saveData.player?.learnedSkills)
+              ? saveData.player.learnedSkills.length
+              : 0,
+            hasActiveSession: Boolean(data?.session?.activeSessionId),
+            lastActionAtMs: timestampToMs(data?.lastActionAt),
+            updatedAtMs: timestampToMs(data?.updatedAt),
+          }
+        })
+        .filter((player) => {
+          if (!keyword) return true
+          return (
+            player.uid.toLowerCase().includes(keyword) ||
+            player.email.toLowerCase().includes(keyword) ||
+            player.name.toLowerCase().includes(keyword)
+          )
+        })
+        .sort((left, right) => right.updatedAtMs - left.updatedAtMs)
+        .slice(0, limit)
+
+      return {
+        ok: true,
+        players,
+      }
+    } catch (error) {
+      console.error('listAdminPlayersAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi tai danh sach nguoi choi.'
+      )
+    }
+  }
+)
+
+export const getAdminPlayerDetailAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const targetUid = String(request.data?.targetUid || '').trim()
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!targetUid) {
+      throw new HttpsError('invalid-argument', 'Nguoi choi khong hop le.')
+    }
+
+    await assertAdmin(uid)
+
+    try {
+      const snap = await db.collection('users').doc(targetUid).get()
+
+      if (!snap.exists) {
+        return {
+          ok: false,
+          message: 'Khong tim thay nguoi choi nay.',
+        }
+      }
+
+      const data = snap.data() || {}
+      const saveData = normalizeSaveData(data?.saveData)
+      const finalStats = getFinalStats(saveData.player)
+      const equippedSkills = Array.isArray(saveData.player?.equippedSkills)
+        ? saveData.player.equippedSkills
+        : []
+
+      return {
+        ok: true,
+        player: {
+          uid: targetUid,
+          email: String(data?.email || ''),
+          role: String(data?.role || 'player'),
+          name: getAuditActorName(saveData.player, data?.profile?.displayName || 'Vo Danh'),
+          realm: normalizeRealm(saveData.player?.realm),
+          stage: Number(saveData.player?.stage) || 1,
+          exp: Number(saveData.player?.exp) || 0,
+          power: getPowerScore(saveData.player),
+          spiritStones: Number(saveData.player?.spiritStones) || 0,
+          herbs: Number(saveData.player?.herbs) || 0,
+          hp: Number(saveData.player?.hp) || 0,
+          mp: Number(saveData.player?.mp) || 0,
+          maxHp: Number(finalStats?.maxHp) || 0,
+          maxMp: Number(finalStats?.maxMp) || 0,
+          damage: Number(finalStats?.damage) || 0,
+          defense: Number(finalStats?.defense) || 0,
+          inventoryCount: Array.isArray(saveData.player?.inventory)
+            ? saveData.player.inventory.length
+            : 0,
+          learnedSkillCount: Array.isArray(saveData.player?.learnedSkills)
+            ? saveData.player.learnedSkills.length
+            : 0,
+          equippedSkillCount: equippedSkills.filter(Boolean).length,
+          hasActiveSession: Boolean(data?.session?.activeSessionId),
+          currentDungeonFloor: saveData.currentDungeonFloor ?? null,
+          welfareMissionClaimCount: Object.keys(saveData.welfare?.missionClaims || {}).length,
+          welfareActivityClaimCount: Object.keys(saveData.welfare?.activityClaims || {}).length,
+          lastActionAtMs: timestampToMs(data?.lastActionAt),
+          updatedAtMs: timestampToMs(data?.updatedAt),
+        },
+      }
+    } catch (error) {
+      console.error('getAdminPlayerDetailAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi tai ho so nguoi choi.'
       )
     }
   }
@@ -4539,6 +4999,21 @@ export const updateRewardCodeAction = onCall(
         },
         { merge: true }
       )
+
+      await writeAuditLog({
+        action: 'code.update',
+        category: 'code',
+        actorUid: uid,
+        actorName: 'Admin',
+        summary: `Da cap nhat code ${code}.`,
+        details: {
+          code,
+          maxUses,
+          note,
+          active,
+          reward,
+        },
+      })
 
       return {
         ok: true,
