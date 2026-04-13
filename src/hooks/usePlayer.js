@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { doc, onSnapshot } from 'firebase/firestore'
 import { loadGame, saveGame } from '../utils/save'
 import {
   cultivateAction,
@@ -23,6 +24,14 @@ import {
   listAuditLogsAction,
   listAdminPlayersAction,
   getAdminPlayerDetailAction,
+  setPlayerBlockedAction,
+  sendAdminGiftAction,
+  listSystemMailsAction,
+  claimSystemMailAction,
+  claimAllSystemMailsAction,
+  deleteSystemMailAction,
+  deleteClaimedSystemMailsAction,
+  sendBroadcastSystemMailAction,
   upgradeHerbGardenAction,
   plantHerbSeedAction,
   harvestHerbSlotAction,
@@ -81,6 +90,7 @@ import {
   createDefaultWelfareState,
   normalizeWelfareState,
 } from '../systems/welfare'
+import { db } from '../firebase'
 
 import { useDungeonCombat } from './useDungeonCombat'
 import { useCombatLog } from './useCombatLog'
@@ -165,6 +175,7 @@ export function usePlayer(user) {
   const publicSyncRef = useRef('')
   const authoritativeSyncPromiseRef = useRef(null)
   const authoritativeSyncTimeoutRef = useRef(null)
+  const lastRemoteUpdateRef = useRef('')
   const allowDevFallback = import.meta.env.DEV
 
   const finalStats = useMemo(() => getFinalStats(player), [player])
@@ -355,6 +366,7 @@ export function usePlayer(user) {
     actionInFlightRef.current = false
     alchemyClaimInFlightRef.current = false
     authoritativeSyncPromiseRef.current = null
+    lastRemoteUpdateRef.current = ''
     clearScheduledAuthoritativeSync()
   }, [user?.uid, replaceCombatLog])
 
@@ -408,6 +420,47 @@ export function usePlayer(user) {
       window.removeEventListener('focus', handleFocusSync)
       document.removeEventListener('visibilitychange', handleFocusSync)
     }
+  }, [user?.uid])
+
+  useEffect(() => {
+    if (!user?.uid) return undefined
+
+    const userRef = doc(db, 'users', user.uid)
+
+    const unsubscribe = onSnapshot(
+      userRef,
+      (snap) => {
+        if (!snap.exists()) return
+
+        const data = snap.data() || {}
+        const updatedAtMs =
+          typeof data?.updatedAt?.toMillis === 'function' ? data.updatedAt.toMillis() : 0
+        const lastActionAtMs =
+          typeof data?.lastActionAt?.toMillis === 'function' ? data.lastActionAt.toMillis() : 0
+        const remoteMessage = String(data?.saveData?.message || '')
+        const fingerprint = `${updatedAtMs}:${lastActionAtMs}:${remoteMessage}`
+
+        if (!fingerprint) return
+
+        if (!lastRemoteUpdateRef.current) {
+          lastRemoteUpdateRef.current = fingerprint
+          return
+        }
+
+        if (lastRemoteUpdateRef.current === fingerprint) return
+
+        lastRemoteUpdateRef.current = fingerprint
+
+        if (!actionInFlightRef.current) {
+          scheduleAuthoritativeRefresh(120)
+        }
+      },
+      (error) => {
+        console.error('Player realtime sync error:', error)
+      }
+    )
+
+    return () => unsubscribe()
   }, [user?.uid])
 
   useEffect(() => {
@@ -1313,6 +1366,183 @@ export function usePlayer(user) {
     }
   }
 
+  async function handleSendAdminGift(targetUid, reward, note = '') {
+    if (!user) {
+      pushLog('Hay dang nhap tai khoan admin de gui qua.')
+      return null
+    }
+
+    try {
+      const result = await sendAdminGiftAction(targetUid, reward, note)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the gui qua cho nguoi choi nay.')
+        return null
+      }
+
+      pushLog(result.message || 'Da gui qua cho nguoi choi.')
+      return result
+    } catch (error) {
+      console.error('Send admin gift error:', error)
+      pushLog('Khong gui duoc qua admin cho nguoi choi.')
+      return null
+    }
+  }
+
+  async function handleSetPlayerBlocked(targetUid, blocked) {
+    if (!user) {
+      pushLog('Hay dang nhap tai khoan admin de khoa mo tai khoan.')
+      return null
+    }
+
+    try {
+      const result = await setPlayerBlockedAction(targetUid, blocked)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong thay doi duoc trang thai tai khoan.')
+        return null
+      }
+
+      pushLog(result.message || 'Da cap nhat trang thai tai khoan.')
+      return result
+    } catch (error) {
+      console.error('Set player blocked error:', error)
+      pushLog('Khong cap nhat duoc trang thai khoa mo tai khoan.')
+      return null
+    }
+  }
+
+  async function handleListSystemMails() {
+    if (!user) {
+      pushLog('Hay dang nhap de xem thu he thong.')
+      return []
+    }
+
+    try {
+      const result = await listSystemMailsAction()
+      return Array.isArray(result?.mails) ? result.mails : []
+    } catch (error) {
+      console.error('List system mails error:', error)
+      pushLog('Khong tai duoc danh sach thu he thong.')
+      return []
+    }
+  }
+
+  async function handleClaimSystemMail(mailId) {
+    if (!user) {
+      pushLog('Hay dang nhap de nhan thu he thong.')
+      return null
+    }
+
+    try {
+      const result = await claimSystemMailAction(mailId)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the nhan thu nay.')
+        return null
+      }
+
+      applyServerActionResult(result)
+      return result
+    } catch (error) {
+      console.error('Claim system mail error:', error)
+      pushLog('Khong nhan duoc thu he thong.')
+      return null
+    }
+  }
+
+  async function handleClaimAllSystemMails() {
+    if (!user) {
+      pushLog('Hay dang nhap de nhan tat ca thu.')
+      return null
+    }
+
+    try {
+      const result = await claimAllSystemMailsAction()
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong co thu nao de nhan.')
+        return null
+      }
+
+      applyServerActionResult(result)
+      return result
+    } catch (error) {
+      console.error('Claim all system mails error:', error)
+      pushLog('Khong nhan duoc tat ca thu he thong.')
+      return null
+    }
+  }
+
+  async function handleDeleteSystemMail(mailId) {
+    if (!user) {
+      pushLog('Hay dang nhap de xoa thu he thong.')
+      return null
+    }
+
+    try {
+      const result = await deleteSystemMailAction(mailId)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong the xoa thu nay.')
+        return null
+      }
+
+      pushLog(result.message || 'Da xoa thu he thong.')
+      return result
+    } catch (error) {
+      console.error('Delete system mail error:', error)
+      pushLog('Khong xoa duoc thu he thong.')
+      return null
+    }
+  }
+
+  async function handleDeleteClaimedSystemMails() {
+    if (!user) {
+      pushLog('Hay dang nhap de xoa thu da nhan.')
+      return null
+    }
+
+    try {
+      const result = await deleteClaimedSystemMailsAction()
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong co thu da nhan de xoa.')
+        return null
+      }
+
+      pushLog(result.message || 'Da xoa cac thu da nhan.')
+      return result
+    } catch (error) {
+      console.error('Delete claimed system mails error:', error)
+      pushLog('Khong xoa duoc cac thu da nhan.')
+      return null
+    }
+  }
+
+  async function handleSendBroadcastSystemMail(reward, note = '') {
+    if (!user) {
+      pushLog('Hay dang nhap tai khoan admin de gui thu toan server.')
+      return null
+    }
+
+    try {
+      const result = await sendBroadcastSystemMailAction(reward, note)
+
+      if (!result?.ok) {
+        pushLog(result?.message || 'Khong gui duoc thu toan server.')
+        return null
+      }
+
+      pushLog(result.message || 'Da gui thu toan server.')
+      return result
+    } catch (error) {
+      console.error('Send broadcast system mail error:', error)
+      pushLog('Khong gui duoc thu toan server.')
+      return null
+    }
+  }
+
   async function handleUnequipItem(slot) {
     if (!user) {
       setPlayer((prev) => {
@@ -1748,6 +1978,14 @@ export function usePlayer(user) {
       listAuditLogs: handleListAuditLogs,
       listAdminPlayers: handleListAdminPlayers,
       getAdminPlayerDetail: handleGetAdminPlayerDetail,
+      setPlayerBlocked: handleSetPlayerBlocked,
+      sendAdminGift: handleSendAdminGift,
+      listSystemMails: handleListSystemMails,
+      claimSystemMail: handleClaimSystemMail,
+      claimAllSystemMails: handleClaimAllSystemMails,
+      deleteSystemMail: handleDeleteSystemMail,
+      deleteClaimedSystemMails: handleDeleteClaimedSystemMails,
+      sendBroadcastSystemMail: handleSendBroadcastSystemMail,
       equipSkill: handleEquipSkill,
       unequipSkill: handleUnequipSkill,
       equipItem: handleEquipItem,

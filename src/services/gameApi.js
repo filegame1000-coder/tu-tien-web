@@ -243,6 +243,94 @@ export async function getAdminPlayerDetailAction(targetUid) {
   }
 }
 
+export async function setPlayerBlockedAction(targetUid, blocked) {
+  try {
+    const fn = httpsCallable(functions, 'setPlayerBlockedAction')
+    const res = await fn({ targetUid, blocked })
+    return res.data
+  } catch (error) {
+    console.error('setPlayerBlockedAction error:', error)
+    throw error
+  }
+}
+
+export async function sendAdminGiftAction(targetUid, reward, note = '') {
+  try {
+    const fn = httpsCallable(functions, 'sendAdminGiftAction')
+    const res = await fn({ targetUid, reward, note })
+    return res.data
+  } catch (error) {
+    console.error('sendAdminGiftAction error:', error)
+    throw error
+  }
+}
+
+export async function listSystemMailsAction() {
+  try {
+    const fn = httpsCallable(functions, 'listSystemMailsAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('listSystemMailsAction error:', error)
+    throw error
+  }
+}
+
+export async function claimSystemMailAction(mailId) {
+  try {
+    const fn = httpsCallable(functions, 'claimSystemMailAction')
+    const res = await fn({ mailId })
+    return res.data
+  } catch (error) {
+    console.error('claimSystemMailAction error:', error)
+    throw error
+  }
+}
+
+export async function claimAllSystemMailsAction() {
+  try {
+    const fn = httpsCallable(functions, 'claimAllSystemMailsAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('claimAllSystemMailsAction error:', error)
+    throw error
+  }
+}
+
+export async function deleteSystemMailAction(mailId) {
+  try {
+    const fn = httpsCallable(functions, 'deleteSystemMailAction')
+    const res = await fn({ mailId })
+    return res.data
+  } catch (error) {
+    console.error('deleteSystemMailAction error:', error)
+    throw error
+  }
+}
+
+export async function deleteClaimedSystemMailsAction() {
+  try {
+    const fn = httpsCallable(functions, 'deleteClaimedSystemMailsAction')
+    const res = await fn({})
+    return res.data
+  } catch (error) {
+    console.error('deleteClaimedSystemMailsAction error:', error)
+    throw error
+  }
+}
+
+export async function sendBroadcastSystemMailAction(reward, note = '') {
+  try {
+    const fn = httpsCallable(functions, 'sendBroadcastSystemMailAction')
+    const res = await fn({ reward, note })
+    return res.data
+  } catch (error) {
+    console.error('sendBroadcastSystemMailAction error:', error)
+    throw error
+  }
+}
+
 export async function enterDungeonAction(floor) {
   try {
     const fn = httpsCallable(functions, 'enterDungeonAction')

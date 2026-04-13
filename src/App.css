@@ -63,6 +63,56 @@ input {
   margin-bottom: 22px;
 }
 
+.admin-alert-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 18px;
+  padding: 20px 22px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 120, 120, 0.45);
+  background:
+    radial-gradient(circle at top right, rgba(255, 162, 162, 0.16), transparent 30%),
+    linear-gradient(135deg, rgba(96, 10, 10, 0.96), rgba(50, 8, 8, 0.98));
+  box-shadow:
+    0 18px 40px rgba(68, 5, 5, 0.4),
+    inset 0 0 0 1px rgba(255, 209, 209, 0.08);
+}
+
+.admin-alert-copy h2 {
+  margin: 4px 0 6px;
+  color: #fff0f0;
+  font-family: 'Times New Roman', Georgia, serif;
+  font-size: clamp(24px, 3vw, 34px);
+}
+
+.admin-alert-copy p {
+  margin: 0;
+  color: #ffd7d7;
+}
+
+.admin-alert-kicker {
+  color: #ffb3b3;
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+}
+
+.admin-alert-button {
+  min-width: 220px;
+  min-height: 64px;
+  padding: 16px 24px;
+  border: 1px solid rgba(255, 220, 220, 0.45);
+  background: linear-gradient(180deg, #ff5d5d, #b91c1c);
+  color: #fff7f7;
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  box-shadow: 0 0 24px rgba(255, 99, 99, 0.28);
+}
+
 .dao-tab {
   display: inline-flex;
   align-items: center;
@@ -87,6 +137,25 @@ input {
   color: #ffd27c;
   border-color: rgba(235, 178, 74, 0.6);
   box-shadow: 0 0 20px rgba(229, 169, 59, 0.12);
+}
+
+.dao-tab-admin {
+  border-color: rgba(255, 121, 121, 0.55);
+  background: linear-gradient(180deg, rgba(118, 19, 19, 0.92), rgba(72, 10, 10, 0.94));
+  color: #ffd8d8;
+  box-shadow: 0 0 20px rgba(185, 28, 28, 0.18);
+}
+
+.dao-tab-admin:hover {
+  border-color: rgba(255, 170, 170, 0.75);
+  color: #fff1f1;
+}
+
+.dao-tab-admin.active {
+  background: linear-gradient(180deg, rgba(239, 68, 68, 0.95), rgba(153, 27, 27, 0.98));
+  border-color: rgba(255, 205, 205, 0.85);
+  color: #fff7f7;
+  box-shadow: 0 0 26px rgba(239, 68, 68, 0.28);
 }
 
 .dao-tab.ghost {
@@ -963,4 +1032,15 @@ input {
 
 .herb-slot-card .dao-btn {
   margin-top: auto;
+}
+
+@media (max-width: 1024px) {
+  .admin-alert-banner {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .admin-alert-button {
+    width: 100%;
+  }
 }

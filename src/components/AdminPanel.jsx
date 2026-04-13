@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 
 const categories = [
   { value: 'all', label: 'Tat ca' },
+  { value: 'admin', label: 'Admin' },
+  { value: 'mail', label: 'Thu' },
   { value: 'code', label: 'Code' },
   { value: 'market', label: 'Cho' },
   { value: 'boss', label: 'Boss' },
@@ -73,6 +75,12 @@ export default function AdminPanel({ actions, latestMessage = '' }) {
   const [selectedUid, setSelectedUid] = useState('')
   const [detailLoading, setDetailLoading] = useState(false)
   const [selectedPlayer, setSelectedPlayer] = useState(null)
+  const [giftJson, setGiftJson] = useState('{\n  "spiritStones": 500\n}')
+  const [giftNote, setGiftNote] = useState('Ho tro tu admin')
+  const [sendingGift, setSendingGift] = useState(false)
+  const [broadcastJson, setBroadcastJson] = useState('{\n  "spiritStones": 200\n}')
+  const [broadcastNote, setBroadcastNote] = useState('Qua su kien toan server')
+  const [broadcasting, setBroadcasting] = useState(false)
 
   const groupedCount = useMemo(() => {
     return logs.reduce((acc, item) => {
@@ -162,6 +170,86 @@ export default function AdminPanel({ actions, latestMessage = '' }) {
     setStatus(latestMessage)
   }, [latestMessage])
 
+  async function handleSendGift() {
+    if (!selectedPlayer?.uid) {
+      setStatus('Hay chon mot nguoi choi de gui qua.')
+      return
+    }
+
+    let reward
+    try {
+      reward = JSON.parse(giftJson)
+    } catch {
+      setStatus('Reward JSON khong hop le.')
+      return
+    }
+
+    setSendingGift(true)
+    setStatus(`Dang gui qua cho ${selectedPlayer.name}...`)
+
+    const result = await actions.sendAdminGift(selectedPlayer.uid, reward, giftNote)
+
+    if (result?.ok) {
+      setStatus(result.message || `Da gui qua cho ${selectedPlayer.name}.`)
+      await refreshPlayerDetail(selectedPlayer.uid, false)
+      await refreshPlayers(keyword, false)
+      await refreshLogs('all', false)
+    } else {
+      setStatus(result?.message || 'Khong gui duoc qua cho nguoi choi nay.')
+    }
+
+    setSendingGift(false)
+  }
+
+  async function handleBroadcastGift() {
+    let reward
+    try {
+      reward = JSON.parse(broadcastJson)
+    } catch {
+      setStatus('Reward JSON thu toan server khong hop le.')
+      return
+    }
+
+    setBroadcasting(true)
+    setStatus('Dang gui thu toan server...')
+
+    const result = await actions.sendBroadcastSystemMail(reward, broadcastNote)
+
+    if (result?.ok) {
+      setStatus(result.message || 'Da gui thu toan server.')
+      await refreshLogs('all', false)
+    } else {
+      setStatus(result?.message || 'Khong gui duoc thu toan server.')
+    }
+
+    setBroadcasting(false)
+  }
+
+  async function handleToggleBlocked() {
+    if (!selectedPlayer?.uid) {
+      setStatus('Hay chon mot nguoi choi de khoa mo tai khoan.')
+      return
+    }
+
+    const nextBlocked = !selectedPlayer.blocked
+    setStatus(
+      nextBlocked
+        ? `Dang khoa tai khoan ${selectedPlayer.name}...`
+        : `Dang mo khoa tai khoan ${selectedPlayer.name}...`
+    )
+
+    const result = await actions.setPlayerBlocked(selectedPlayer.uid, nextBlocked)
+
+    if (result?.ok) {
+      setStatus(result.message || 'Da cap nhat trang thai tai khoan.')
+      await refreshPlayerDetail(selectedPlayer.uid, false)
+      await refreshPlayers(keyword, false)
+      await refreshLogs('all', false)
+    } else {
+      setStatus(result?.message || 'Khong cap nhat duoc trang thai tai khoan.')
+    }
+  }
+
   return (
     <section className="altar-card bag-panel">
       <div className="altar-frame">
@@ -225,7 +313,8 @@ export default function AdminPanel({ actions, latestMessage = '' }) {
             {detailLoading ? (
               <div className="dao-auth-note">Dang tai ho so nguoi choi...</div>
             ) : selectedPlayer ? (
-              <div className="requirements-list">
+              <div className="content-stack">
+                <div className="requirements-list">
                 <div>
                   <span>Dao hieu</span>
                   <strong>{selectedPlayer.name}</strong>
@@ -241,6 +330,10 @@ export default function AdminPanel({ actions, latestMessage = '' }) {
                 <div>
                   <span>Role</span>
                   <strong>{selectedPlayer.role}</strong>
+                </div>
+                <div>
+                  <span>Trang thai tai khoan</span>
+                  <strong>{selectedPlayer.blocked ? 'Dang bi khoa' : 'Dang hoat dong'}</strong>
                 </div>
                 <div>
                   <span>Canh gioi</span>
@@ -302,6 +395,53 @@ export default function AdminPanel({ actions, latestMessage = '' }) {
                   <span>Hanh dong cuoi</span>
                   <strong>{formatTime(selectedPlayer.lastActionAtMs)}</strong>
                 </div>
+                </div>
+
+                <div className="mini-panel" style={{ padding: 16 }}>
+                  <div className="mini-panel-title">Quan ly tai khoan</div>
+                  <div className="action-row">
+                    <button
+                      className={`dao-btn ${
+                        selectedPlayer.blocked ? 'dao-btn-primary' : 'dao-btn-danger'
+                      }`}
+                      onClick={() => void handleToggleBlocked()}
+                    >
+                      {selectedPlayer.blocked ? 'Mo khoa tai khoan' : 'Khoa tai khoan'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mini-panel" style={{ padding: 16 }}>
+                  <div className="mini-panel-title">Gửi thư quà cho người chơi này</div>
+                  <div className="dao-auth-form">
+                    <label className="dao-auth-label">Ghi chú admin</label>
+                    <input
+                      value={giftNote}
+                      onChange={(event) => setGiftNote(event.target.value)}
+                      className="dao-input dao-auth-input"
+                      placeholder="Hỗ trợ từ admin"
+                    />
+
+                    <label className="dao-auth-label">Reward JSON</label>
+                    <textarea
+                      value={giftJson}
+                      onChange={(event) => setGiftJson(event.target.value)}
+                      className="dao-input dao-auth-input"
+                      rows={9}
+                      style={{ resize: 'vertical', minHeight: 180 }}
+                    />
+
+                    <div className="action-row">
+                      <button
+                        className="dao-btn dao-btn-danger"
+                        onClick={() => void handleSendGift()}
+                        disabled={sendingGift}
+                      >
+                        {sendingGift ? 'Đang gửi thư...' : 'Gửi thư quà ngay'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="dao-auth-note">Hay chon mot nguoi choi de xem ho so.</div>
@@ -349,6 +489,38 @@ export default function AdminPanel({ actions, latestMessage = '' }) {
                   <strong>0</strong>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+
+        <div className="mini-panel" style={{ marginBottom: 20 }}>
+          <div className="mini-panel-title">Gui thu toan server</div>
+          <div className="dao-auth-form">
+            <label className="dao-auth-label">Ghi chu su kien</label>
+            <input
+              value={broadcastNote}
+              onChange={(event) => setBroadcastNote(event.target.value)}
+              placeholder="Qua su kien toan server"
+              className="dao-input dao-auth-input"
+            />
+
+            <label className="dao-auth-label">Reward JSON toan server</label>
+            <textarea
+              value={broadcastJson}
+              onChange={(event) => setBroadcastJson(event.target.value)}
+              className="dao-input dao-auth-input"
+              rows={8}
+              style={{ resize: 'vertical', minHeight: 170 }}
+            />
+
+            <div className="action-row">
+              <button
+                className="dao-btn dao-btn-danger"
+                onClick={() => void handleBroadcastGift()}
+                disabled={broadcasting}
+              >
+                {broadcasting ? 'Dang gui...' : 'Gui thu toan server'}
+              </button>
             </div>
           </div>
         </div>

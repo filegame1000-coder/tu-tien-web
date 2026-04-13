@@ -1416,6 +1416,45 @@ function describeRewardPayload(rawReward) {
   return parts.length > 0 ? parts.join(', ') : 'qua thuong'
 }
 
+async function createSystemMailForUid({
+  targetUid,
+  senderUid = '',
+  senderName = 'He thong',
+  title = 'Thu he thong',
+  body = '',
+  reward,
+  source = 'system',
+}) {
+  const safeReward = normalizeRewardPayload(reward)
+  const rewardSummary = describeRewardPayload(safeReward)
+  const mailRef = db
+    .collection('users')
+    .doc(targetUid)
+    .collection('systemMails')
+    .doc()
+
+  await mailRef.set(
+    {
+      title: String(title || 'Thu he thong'),
+      body: String(body || ''),
+      reward: safeReward,
+      rewardSummary,
+      claimed: false,
+      createdAtMs: Date.now(),
+      createdAt: FieldValue.serverTimestamp(),
+      senderUid: String(senderUid || ''),
+      senderName: String(senderName || 'He thong'),
+      source: String(source || 'system'),
+    },
+    { merge: true }
+  )
+
+  return {
+    id: mailRef.id,
+    rewardSummary,
+  }
+}
+
 async function assertAdmin(uid) {
   const snap = await db.collection('users').doc(uid).get()
   const data = snap.data() || {}
@@ -1424,6 +1463,12 @@ async function assertAdmin(uid) {
 
   if (role !== 'admin' && !isAdminEmail(email)) {
     throw new HttpsError('permission-denied', 'Chi admin moi duoc thuc hien thao tac nay.')
+  }
+}
+
+function ensureUserNotBlocked(data) {
+  if (Boolean(data?.blocked)) {
+    throw new HttpsError('permission-denied', 'Tai khoan nay da bi khoa.')
   }
 }
 
@@ -2575,6 +2620,7 @@ async function runPlayerAction(uid, resolver) {
     const now = Date.now()
     const snap = await transaction.get(ref)
     const data = snap.exists ? snap.data() : {}
+    ensureUserNotBlocked(data)
     const normalizedSave = normalizeSaveData(data?.saveData)
     const resolved = await Promise.resolve(
       resolver(normalizedSave, {
@@ -4904,6 +4950,7 @@ export const getAdminPlayerDetailAction = onCall(
           uid: targetUid,
           email: String(data?.email || ''),
           role: String(data?.role || 'player'),
+          blocked: Boolean(data?.blocked),
           name: getAuditActorName(saveData.player, data?.profile?.displayName || 'Vo Danh'),
           realm: normalizeRealm(saveData.player?.realm),
           stage: Number(saveData.player?.stage) || 1,
@@ -4937,6 +4984,654 @@ export const getAdminPlayerDetailAction = onCall(
       throw new HttpsError(
         error?.code || 'internal',
         error?.message || 'Loi server khi tai ho so nguoi choi.'
+      )
+    }
+  }
+)
+
+export const setPlayerBlockedAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const targetUid = String(request.data?.targetUid || '').trim()
+    const blocked = Boolean(request.data?.blocked)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!targetUid) {
+      throw new HttpsError('invalid-argument', 'Nguoi choi khong hop le.')
+    }
+
+    if (targetUid === uid) {
+      throw new HttpsError('failed-precondition', 'Khong the tu khoa tai khoan admin dang dung.')
+    }
+
+    await assertAdmin(uid)
+
+    try {
+      const targetRef = db.collection('users').doc(targetUid)
+      const snap = await targetRef.get()
+
+      if (!snap.exists) {
+        return {
+          ok: false,
+          message: 'Khong tim thay nguoi choi nay.',
+        }
+      }
+
+      const data = snap.data() || {}
+      const saveData = normalizeSaveData(data?.saveData)
+      const targetName = getAuditActorName(
+        saveData.player,
+        data?.profile?.displayName || data?.email || 'Vo Danh'
+      )
+
+      await targetRef.set(
+        {
+          blocked,
+          blockedAt: blocked ? FieldValue.serverTimestamp() : null,
+          blockedAtMs: blocked ? Date.now() : 0,
+          session: {
+            activeSessionId: blocked ? '' : String(data?.session?.activeSessionId || ''),
+            updatedAtMs: Date.now(),
+          },
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      )
+
+      await writeAuditLog({
+        action: blocked ? 'admin.block_account' : 'admin.unblock_account',
+        category: 'admin',
+        actorUid: uid,
+        actorName: 'Admin',
+        targetUid,
+        targetName,
+        summary: blocked
+          ? `Da khoa tai khoan ${targetName}.`
+          : `Da mo khoa tai khoan ${targetName}.`,
+        details: {
+          blocked,
+          email: String(data?.email || ''),
+        },
+      })
+
+      return {
+        ok: true,
+        message: blocked
+          ? `Da khoa tai khoan ${targetName}.`
+          : `Da mo khoa tai khoan ${targetName}.`,
+        targetUid,
+        targetName,
+        blocked,
+      }
+    } catch (error) {
+      console.error('setPlayerBlockedAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi khoa mo tai khoan.'
+      )
+    }
+  }
+)
+
+export const sendAdminGiftAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const targetUid = String(request.data?.targetUid || '').trim()
+    const note = String(request.data?.note || '').trim().slice(0, 200)
+    const reward = normalizeRewardPayload(request.data?.reward)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!targetUid) {
+      throw new HttpsError('invalid-argument', 'Chua chon nguoi choi nhan qua.')
+    }
+
+    await assertAdmin(uid)
+
+    if (!hasRewardPayloadContent(reward)) {
+      throw new HttpsError('invalid-argument', 'Phan qua gui di khong hop le.')
+    }
+
+    try {
+      const [adminSnap, targetSnap] = await Promise.all([
+        db.collection('users').doc(uid).get(),
+        db.collection('users').doc(targetUid).get(),
+      ])
+
+      if (!targetSnap.exists) {
+        return {
+          ok: false,
+          message: 'Khong tim thay nguoi choi nhan qua.',
+        }
+      }
+
+      const adminData = adminSnap.data() || {}
+      const adminSave = normalizeSaveData(adminData?.saveData)
+      const actorName = getAuditActorName(
+        adminSave.player,
+        adminData?.profile?.displayName || adminData?.email || 'Admin'
+      )
+      const rewardSummary = describeRewardPayload(reward)
+      const targetData = targetSnap.data() || {}
+      const targetSave = normalizeSaveData(targetData?.saveData)
+      const targetName = getAuditActorName(
+        targetSave.player,
+        targetData?.profile?.displayName || 'Vo Danh'
+      )
+      const mailTitle = 'Thư quà từ quản trị'
+      const mailBody = note || `Quản trị đã gửi cho bạn: ${rewardSummary}.`
+      const createdMail = await createSystemMailForUid({
+        targetUid,
+        senderUid: uid,
+        senderName: actorName,
+        title: mailTitle,
+        body: mailBody,
+        reward,
+        source: 'admin',
+      })
+
+      await writeAuditLog({
+        action: 'admin.send_mail',
+        category: 'admin',
+        actorUid: uid,
+        actorName,
+        targetUid,
+        targetName,
+        summary: `Da gui thu qua cho ${targetName}.`,
+        details: {
+          note,
+          reward,
+          rewardSummary: createdMail.rewardSummary,
+          mailTitle,
+          mailId: createdMail.id,
+        },
+      })
+
+      return {
+        ok: true,
+        message: `Da gui thu qua cho ${targetName}: ${createdMail.rewardSummary}.`,
+        targetUid,
+        targetName,
+        rewardSummary: createdMail.rewardSummary,
+        mailId: createdMail.id,
+      }
+    } catch (error) {
+      console.error('sendAdminGiftAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi gui qua cho nguoi choi.'
+      )
+    }
+  }
+)
+
+export const sendBroadcastSystemMailAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const note = String(request.data?.note || '').trim().slice(0, 200)
+    const reward = normalizeRewardPayload(request.data?.reward)
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    await assertAdmin(uid)
+
+    if (!hasRewardPayloadContent(reward)) {
+      throw new HttpsError('invalid-argument', 'Phan qua gui toan server khong hop le.')
+    }
+
+    try {
+      const adminSnap = await db.collection('users').doc(uid).get()
+      const adminData = adminSnap.data() || {}
+      const adminSave = normalizeSaveData(adminData?.saveData)
+      const actorName = getAuditActorName(
+        adminSave.player,
+        adminData?.profile?.displayName || adminData?.email || 'Admin'
+      )
+      const rewardSummary = describeRewardPayload(reward)
+      const title = 'Thư quà toàn server'
+      const body = note || `Quản trị gửi quà toàn server: ${rewardSummary}.`
+      const usersSnap = await db.collection('users').get()
+
+      let sentCount = 0
+
+      for (const userDoc of usersSnap.docs) {
+        await createSystemMailForUid({
+          targetUid: userDoc.id,
+          senderUid: uid,
+          senderName: actorName,
+          title,
+          body,
+          reward,
+          source: 'broadcast',
+        })
+        sentCount += 1
+      }
+
+      await writeAuditLog({
+        action: 'admin.send_broadcast_mail',
+        category: 'admin',
+        actorUid: uid,
+        actorName,
+        summary: `Da gui thu toan server cho ${sentCount} tai khoan.`,
+        details: {
+          note,
+          reward,
+          rewardSummary,
+          sentCount,
+        },
+      })
+
+      return {
+        ok: true,
+        message: `Da gui thu toan server cho ${sentCount} tai khoan: ${rewardSummary}.`,
+        sentCount,
+        rewardSummary,
+      }
+    } catch (error) {
+      console.error('sendBroadcastSystemMailAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi gui thu toan server.'
+      )
+    }
+  }
+)
+
+export const listSystemMailsAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      const snap = await db
+        .collection('users')
+        .doc(uid)
+        .collection('systemMails')
+        .orderBy('createdAtMs', 'desc')
+        .limit(50)
+        .get()
+
+      const mails = snap.docs.map((mailDoc) => {
+        const data = mailDoc.data() || {}
+        const reward = normalizeRewardPayload(data.reward)
+        return {
+          id: mailDoc.id,
+          title: String(data.title || 'Thư hệ thống'),
+          body: String(data.body || ''),
+          reward,
+          rewardSummary: String(data.rewardSummary || describeRewardPayload(reward)),
+          claimed: Boolean(data.claimed),
+          senderName: String(data.senderName || 'Hệ thống'),
+          source: String(data.source || 'system'),
+          createdAtMs: Number(data.createdAtMs) || 0,
+          claimedAtMs: Number(data.claimedAtMs) || 0,
+        }
+      })
+
+      return {
+        ok: true,
+        mails,
+      }
+    } catch (error) {
+      console.error('listSystemMailsAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi tai danh sach thu he thong.'
+      )
+    }
+  }
+)
+
+async function claimSystemMailForUser(uid, mailId) {
+  const userRef = db.collection('users').doc(uid)
+  const publicRef = db.collection('publicPlayers').doc(uid)
+  const mailRef = userRef.collection('systemMails').doc(mailId)
+
+  return db.runTransaction(async (transaction) => {
+    const now = Date.now()
+    const userSnap = await transaction.get(userRef)
+    const mailSnap = await transaction.get(mailRef)
+
+    if (!mailSnap.exists) {
+      return {
+        ok: false,
+        message: 'Khong tim thay thu he thong nay.',
+      }
+    }
+
+    const mailData = mailSnap.data() || {}
+    if (mailData.claimed) {
+      return {
+        ok: false,
+        message: 'Thu nay da duoc nhan truoc do.',
+      }
+    }
+
+    const userData = userSnap.exists ? userSnap.data() : {}
+    const saveData = normalizeSaveData(userData?.saveData)
+    const reward = normalizeRewardPayload(mailData.reward)
+    const applied = applyRewardPayload(saveData.player, reward)
+
+    if (!applied?.ok) {
+      return {
+        ok: false,
+        message: applied?.message || 'Khong the nhan thu he thong.',
+      }
+    }
+
+    const title = String(mailData.title || 'Thư hệ thống')
+    const rewardSummary = String(mailData.rewardSummary || describeRewardPayload(reward))
+    const safeMessage = `Da nhan ${title}: ${rewardSummary}.`
+    const safeLogs = sanitizeLogs(saveData.logs, safeMessage)
+    const profile = userData?.profile || { displayName: '' }
+    const payload = {
+      ...saveData,
+      player: applied.player,
+      herbGarden: saveData.herbGarden,
+      crafting: saveData.crafting,
+      message: safeMessage,
+      logs: safeLogs,
+      combatLogs: sanitizeCombatLogs(saveData.combatLogs),
+      welfare: normalizeWelfareState(saveData.welfare, now),
+    }
+
+    transaction.set(
+      userRef,
+      {
+        email: userData?.email || '',
+        role: userData?.role || 'player',
+        profile,
+        saveData: payload,
+        updatedAt: FieldValue.serverTimestamp(),
+        lastActionAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    )
+
+    transaction.set(
+      publicRef,
+      buildPublicPlayerPayload(uid, payload.player, profile),
+      { merge: true }
+    )
+
+    transaction.set(
+      mailRef,
+      {
+        claimed: true,
+        claimedAtMs: now,
+        claimedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    )
+
+    return {
+      ok: true,
+      message: safeMessage,
+      player: payload.player,
+      herbGarden: payload.herbGarden,
+      crafting: payload.crafting,
+      logs: payload.logs,
+      currentDungeonFloor: payload.currentDungeonFloor,
+      currentEnemy: payload.currentEnemy,
+      killCount: payload.killCount,
+      dungeonCooldownUntil: payload.dungeonCooldownUntil,
+      combatLogs: payload.combatLogs,
+      welfare: payload.welfare,
+      mail: {
+        id: mailId,
+        title,
+        rewardSummary,
+      },
+    }
+  })
+}
+
+export const claimSystemMailAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const mailId = String(request.data?.mailId || '').trim()
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!mailId) {
+      throw new HttpsError('invalid-argument', 'Thu khong hop le.')
+    }
+
+    try {
+      const result = await claimSystemMailForUser(uid, mailId)
+
+      if (result?.ok) {
+        await writeAuditLog({
+          action: 'mail.claim',
+          category: 'mail',
+          actorUid: uid,
+          actorName: getAuditActorName(result.player, 'Vo Danh'),
+          targetUid: uid,
+          targetName: getAuditActorName(result.player, 'Vo Danh'),
+          summary: `Da nhan thu ${result.mail?.title || mailId}.`,
+          details: {
+            mailId,
+            rewardSummary: result.mail?.rewardSummary || '',
+          },
+        })
+      }
+
+      return result
+    } catch (error) {
+      console.error('claimSystemMailAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi nhan thu he thong.'
+      )
+    }
+  }
+)
+
+export const claimAllSystemMailsAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      const mailSnap = await db
+        .collection('users')
+        .doc(uid)
+        .collection('systemMails')
+        .where('claimed', '==', false)
+        .limit(20)
+        .get()
+
+      if (mailSnap.empty) {
+        return {
+          ok: false,
+          message: 'Khong co thu nao de nhan.',
+        }
+      }
+
+      let lastResult = null
+      const claimedTitles = []
+
+      for (const mailDoc of mailSnap.docs) {
+        const result = await claimSystemMailForUser(uid, mailDoc.id)
+        if (result?.ok) {
+          lastResult = result
+          claimedTitles.push(result.mail?.title || mailDoc.id)
+        }
+      }
+
+      if (!lastResult) {
+        return {
+          ok: false,
+          message: 'Khong nhan duoc thu nao.',
+        }
+      }
+
+      await writeAuditLog({
+        action: 'mail.claim_all',
+        category: 'mail',
+        actorUid: uid,
+        actorName: getAuditActorName(lastResult.player, 'Vo Danh'),
+        targetUid: uid,
+        targetName: getAuditActorName(lastResult.player, 'Vo Danh'),
+        summary: `Da nhan ${claimedTitles.length} thu he thong.`,
+        details: {
+          titles: claimedTitles,
+        },
+      })
+
+      return {
+        ...lastResult,
+        ok: true,
+        message: `Da nhan ${claimedTitles.length} thu he thong.`,
+      }
+    } catch (error) {
+      console.error('claimAllSystemMailsAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi nhan tat ca thu he thong.'
+      )
+    }
+  }
+)
+
+export const deleteSystemMailAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+    const mailId = String(request.data?.mailId || '').trim()
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    if (!mailId) {
+      throw new HttpsError('invalid-argument', 'Thu khong hop le.')
+    }
+
+    try {
+      const mailRef = db.collection('users').doc(uid).collection('systemMails').doc(mailId)
+      const mailSnap = await mailRef.get()
+
+      if (!mailSnap.exists) {
+        return {
+          ok: false,
+          message: 'Khong tim thay thu nay.',
+        }
+      }
+
+      const data = mailSnap.data() || {}
+      if (!data.claimed) {
+        return {
+          ok: false,
+          message: 'Chi duoc xoa thu da nhan qua.',
+        }
+      }
+
+      await mailRef.delete()
+
+      await writeAuditLog({
+        action: 'mail.delete',
+        category: 'mail',
+        actorUid: uid,
+        actorName: String(data.senderName || 'Nguoi choi'),
+        targetUid: uid,
+        targetName: '',
+        summary: `Da xoa thu ${String(data.title || mailId)}.`,
+        details: {
+          mailId,
+          title: String(data.title || ''),
+        },
+      })
+
+      return {
+        ok: true,
+        message: `Da xoa thu ${String(data.title || mailId)}.`,
+      }
+    } catch (error) {
+      console.error('deleteSystemMailAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi xoa thu he thong.'
+      )
+    }
+  }
+)
+
+export const deleteClaimedSystemMailsAction = onCall(
+  { region: 'asia-southeast1' },
+  async (request) => {
+    const uid = request.auth?.uid
+
+    if (!uid) {
+      throw new HttpsError('unauthenticated', 'Ban chua dang nhap.')
+    }
+
+    try {
+      const snap = await db
+        .collection('users')
+        .doc(uid)
+        .collection('systemMails')
+        .where('claimed', '==', true)
+        .limit(100)
+        .get()
+
+      if (snap.empty) {
+        return {
+          ok: false,
+          message: 'Khong co thu da nhan nao de xoa.',
+        }
+      }
+
+      const batch = db.batch()
+      snap.docs.forEach((mailDoc) => {
+        batch.delete(mailDoc.ref)
+      })
+      await batch.commit()
+
+      await writeAuditLog({
+        action: 'mail.delete_claimed',
+        category: 'mail',
+        actorUid: uid,
+        actorName: 'Nguoi choi',
+        targetUid: uid,
+        targetName: '',
+        summary: `Da xoa ${snap.size} thu da nhan.`,
+        details: {
+          count: snap.size,
+        },
+      })
+
+      return {
+        ok: true,
+        message: `Da xoa ${snap.size} thu da nhan.`,
+        deletedCount: snap.size,
+      }
+    } catch (error) {
+      console.error('deleteClaimedSystemMailsAction error:', error)
+      throw new HttpsError(
+        error?.code || 'internal',
+        error?.message || 'Loi server khi xoa thu da nhan.'
       )
     }
   }

@@ -84,6 +84,21 @@ export function useAuthState() {
   const forcedLogoutRef = useRef(false)
   const currentSessionRef = useRef({ uid: '', sessionId: '' })
 
+  async function forceBlockedSignOut(firebaseUser, customMessage = '') {
+    forcedLogoutRef.current = true
+    setMessage(customMessage || 'Tai khoan nay da bi khoa.')
+    try {
+      await releaseSession(firebaseUser)
+    } catch (error) {
+      console.error('Blocked release session error:', error)
+    } finally {
+      await signOut(auth).catch((error) => {
+        console.error('Blocked sign-out error:', error)
+      })
+      forcedLogoutRef.current = false
+    }
+  }
+
   function cleanupSessionWatcher() {
     if (typeof sessionWatcherRef.current === 'function') {
       sessionWatcherRef.current()
@@ -94,14 +109,13 @@ export function useAuthState() {
   async function ensureUserDoc(firebaseUser) {
     const ref = doc(db, 'users', firebaseUser.uid)
     const snap = await getDoc(ref)
-    const adminEmail = isAdminEmail(firebaseUser.email)
 
     if (!snap.exists()) {
       await setDoc(
         ref,
         {
           email: firebaseUser.email || '',
-          role: adminEmail ? 'admin' : 'player',
+          role: 'player',
           profile: {
             displayName: '',
           },
@@ -112,19 +126,6 @@ export function useAuthState() {
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           saveData: null,
-        },
-        { merge: true }
-      )
-      return
-    }
-
-    if (adminEmail && String(snap.data()?.role || 'player') !== 'admin') {
-      await setDoc(
-        ref,
-        {
-          email: firebaseUser.email || '',
-          role: 'admin',
-          updatedAt: serverTimestamp(),
         },
         { merge: true }
       )
@@ -217,6 +218,15 @@ export function useAuthState() {
         setUserProfile(data)
         setIsAdmin(data?.role === 'admin' || isAdminEmail(firebaseUser?.email))
 
+        if (Boolean(data?.blocked)) {
+          if (forcedLogoutRef.current) return
+          void forceBlockedSignOut(
+            firebaseUser,
+            'Tai khoan nay da bi khoa. Vui long lien he quan tri vien.'
+          )
+          return
+        }
+
         const remoteSessionId = String(data?.session?.activeSessionId || '')
         if (!remoteSessionId || remoteSessionId === localSessionId) return
         if (forcedLogoutRef.current) return
@@ -247,6 +257,15 @@ export function useAuthState() {
 
     const snap = await getDoc(doc(db, 'users', firebaseUser.uid))
     const data = snap.exists() ? snap.data() : null
+
+    if (Boolean(data?.blocked)) {
+      await forceBlockedSignOut(
+        firebaseUser,
+        'Tai khoan nay da bi khoa. Vui long lien he quan tri vien.'
+      )
+      return
+    }
+
     setUserProfile(data)
     setIsAdmin(data?.role === 'admin' || isAdminEmail(firebaseUser?.email))
   }

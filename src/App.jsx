@@ -18,6 +18,7 @@ import CodePanel from './components/CodePanel'
 import WorldBossPanel from './components/WorldBossPanel'
 import WelfarePanel from './components/WelfarePanel'
 import AdminPanel from './components/AdminPanel'
+import SystemMailPanel from './components/SystemMailPanel'
 import { usePublicPlayers } from './hooks/usePublicPlayers'
 import './App.css'
 
@@ -174,6 +175,10 @@ function LoadingScreen({ text = 'Đang tải...' }) {
   )
 }
 
+function hasAdminEmailAccess(email) {
+  return String(email || '').trim().toLowerCase() === 'trinhchibinh13x3@gmail.com'
+}
+
 export default function App() {
   const auth = useAuthState()
   const {
@@ -211,6 +216,7 @@ export default function App() {
     actionState,
   } = usePlayer(user)
   const { publicPlayers, loading: playersLoading } = usePublicPlayers(user?.uid)
+  const adminAccess = isAdmin || hasAdminEmailAccess(user?.email)
 
   if (!ready) {
     return <LoadingScreen text="Đang kết nối hệ thống tài khoản..." />
@@ -257,7 +263,30 @@ export default function App() {
           </button>
         </header>
 
-        <GameTabs activeTab={activeTab} onChange={actions.setActiveTab} isAdmin={isAdmin} />
+        {adminAccess && (
+          <section className="admin-alert-banner">
+            <div className="admin-alert-copy">
+              <div className="admin-alert-kicker">CHE DO QUAN TRI</div>
+              <h2>Ban dang dang nhap bang tai khoan admin</h2>
+              <p>
+                Neu ban khong thay tab Quan Tri, bam nut ben duoi de mo thang vao khu quan tri.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="dao-btn admin-alert-button"
+              onClick={() => actions.setActiveTab('admin')}
+            >
+              MO QUAN TRI
+            </button>
+          </section>
+        )}
+
+        <GameTabs
+          activeTab={activeTab}
+          onChange={actions.setActiveTab}
+          isAdmin={adminAccess}
+        />
 
         <div className="dao-layout">
           <aside className="left-column">
@@ -270,7 +299,7 @@ export default function App() {
           </aside>
 
           <main className="right-column">
-            {activeTab === 'admin' && isAdmin && (
+            {activeTab === 'admin' && adminAccess && (
               <AdminPanel actions={actions} latestMessage={message} />
             )}
 
@@ -294,7 +323,15 @@ export default function App() {
               <CodePanel
                 player={player}
                 actions={actions}
-                isAdmin={isAdmin}
+                isAdmin={adminAccess}
+                latestMessage={message}
+              />
+            )}
+
+            {activeTab === 'mail' && (
+              <SystemMailPanel
+                player={player}
+                actions={actions}
                 latestMessage={message}
               />
             )}
